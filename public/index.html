@@ -1,0 +1,236 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <main class="app">
+    <section id="loginScreen" class="screen active" aria-labelledby="loginTitle">
+      <h1 id="loginTitle" class="top-title">勤務希望管理システム</h1>
+      <p class="sub-title">テイシン警備 国分寺支社</p>
+      <div id="loginMessage" class="message" role="alert"></div>
+
+      <div class="panel">
+        <div class="form-grid">
+          <div>
+            <label for="loginEmail">メールアドレス</label>
+            <input id="loginEmail" type="email" autocomplete="email" aria-describedby="loginHelp">
+          </div>
+          <div>
+            <label for="loginPassword">パスワード</label>
+            <input id="loginPassword" type="password" autocomplete="current-password">
+          </div>
+        </div>
+        <p id="loginHelp" class="small-text">登録したメールアドレスとパスワードを入力してください。</p>
+        <div class="actions">
+          <button id="loginButton" type="button">ログインする</button>
+          <button id="showRegisterButton" class="secondary" type="button">初めて利用する方はこちら</button>
+          <button id="resetPasswordButton" class="neutral" type="button">パスワードを再設定する</button>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="verifyEmailScreen" class="screen" aria-labelledby="verifyEmailTitle">
+      <h1 id="verifyEmailTitle" class="top-title">メールアドレスの確認</h1>
+      <div id="verifyEmailMessage" class="message" role="alert"></div>
+      <div class="panel">
+        <p class="large-help">確認メール内のリンクを押した後、「確認できたか調べる」を押してください。</p>
+        <div class="actions">
+          <button id="checkVerificationButton" type="button">確認できたか調べる</button>
+          <button id="resendVerificationButton" class="neutral" type="button">確認メールをもう一度送る</button>
+          <button id="verifyLogoutButton" class="secondary" type="button">ログアウト</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="registerScreen" class="screen" aria-labelledby="registerTitle">
+      <h1 id="registerTitle" class="top-title">新規会員登録</h1>
+      <div id="registerMessage" class="message" role="alert"></div>
+      <div class="panel">
+        <div class="form-grid">
+          <div>
+            <label for="regGuardId">警備員番号</label>
+            <input id="regGuardId" type="text" inputmode="numeric" maxlength="6">
+          </div>
+          <div>
+            <label for="regName">氏名</label>
+            <input id="regName" type="text" autocomplete="name">
+          </div>
+          <div>
+            <label for="regEmail">メールアドレス</label>
+            <input id="regEmail" type="email" autocomplete="email">
+          </div>
+          <div>
+            <label for="regZip">郵便番号</label>
+            <input id="regZip" type="text" inputmode="numeric" autocomplete="postal-code">
+          </div>
+          <div>
+            <label for="regPref">都道府県</label>
+            <input id="regPref" type="text" autocomplete="address-level1">
+          </div>
+          <div>
+            <label for="regCity">市区町村</label>
+            <input id="regCity" type="text" autocomplete="address-level2">
+          </div>
+          <div>
+            <label for="regStreet">町名・番地</label>
+            <input id="regStreet" type="text" autocomplete="address-line1">
+          </div>
+          <div>
+            <label for="regBuilding">建物名・部屋番号</label>
+            <input id="regBuilding" type="text" autocomplete="address-line2">
+          </div>
+          <div>
+            <label for="regNearestStation">最寄り駅</label>
+            <input id="regNearestStation" type="text">
+          </div>
+          <div>
+            <label for="regPassword">パスワード</label>
+            <input id="regPassword" type="password" autocomplete="new-password">
+          </div>
+          <div>
+            <label for="regPasswordConfirm">パスワード確認</label>
+            <input id="regPasswordConfirm" type="password" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="actions">
+          <button id="registerButton" type="button">登録する</button>
+          <button id="backLoginButton" class="secondary" type="button">ログイン画面へ戻る</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="calendarScreen" class="screen" aria-labelledby="calendarTitle">
+      <div class="header">
+        <div>
+          <h1 id="calendarTitle">勤務希望</h1>
+          <div class="user-line"><span id="currentUserName"></span> / 警備員番号 <span id="currentUserId"></span></div>
+        </div>
+        <div class="actions">
+          <button id="logoutButton" class="secondary" type="button">ログアウト</button>
+        </div>
+      </div>
+
+      <div class="month-bar">
+        <button id="prevMonthButton" class="secondary" type="button">前の月</button>
+        <div id="monthLabel" class="month-label" aria-live="polite"></div>
+        <button id="nextMonthButton" class="secondary" type="button">次の月</button>
+        <button id="todayButton" class="neutral" type="button">今日に戻る</button>
+      </div>
+
+      <div class="legend" aria-label="表示の説明">
+        <span class="status-chip status-day">日勤</span>
+        <span class="status-chip status-night">夜勤</span>
+        <span class="status-chip status-both">日勤・夜勤</span>
+        <span class="status-chip status-unavailable">不可</span>
+        <span class="status-chip status-undecided">未定</span>
+        <span class="status-chip status-locked">締切済み</span>
+      </div>
+
+      <div class="calendar" aria-label="勤務希望カレンダー">
+        <div class="weekdays" aria-hidden="true">
+          <div class="weekday sunday">日</div>
+          <div class="weekday">月</div>
+          <div class="weekday">火</div>
+          <div class="weekday">水</div>
+          <div class="weekday">木</div>
+          <div class="weekday">金</div>
+          <div class="weekday saturday">土</div>
+        </div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+      </div>
+    </section>
+
+    <section id="adminScreen" class="screen" aria-labelledby="adminTitle">
+      <div class="header">
+        <div>
+          <h1 id="adminTitle">内勤者用管理画面</h1>
+          <div id="adminDateLabel" class="user-line"></div>
+        </div>
+        <div class="actions">
+          <button id="adminPrevDay" class="secondary" type="button">前の日</button>
+          <button id="adminToday" class="neutral" type="button">今日</button>
+          <button id="adminNextDay" class="secondary" type="button">次の日</button>
+          <button id="adminLogout" class="secondary" type="button">ログアウト</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="admin-tools">
+          <div>
+            <label for="adminDate">表示対象の日付</label>
+            <input id="adminDate" type="date">
+          </div>
+          <div>
+            <label for="adminSearch">検索</label>
+            <input id="adminSearch" type="text" placeholder="番号・氏名・住所・備考">
+          </div>
+          <div>
+            <button id="adminSearchButton" type="button">検索する</button>
+          </div>
+          <div>
+            <button id="adminClearButton" class="secondary" type="button">条件を戻す</button>
+          </div>
+        </div>
+
+        <div id="adminFilters" class="filter-buttons" aria-label="絞り込み">
+          <button type="button" data-filter="all" class="active">すべて</button>
+          <button type="button" data-filter="day">日勤希望者</button>
+          <button type="button" data-filter="night">夜勤希望者</button>
+          <button type="button" data-filter="both">日勤・夜勤どちらも可能</button>
+          <button type="button" data-filter="unavailable">勤務不可</button>
+          <button type="button" data-filter="undecided">未定</button>
+          <button type="button" data-filter="none">未提出</button>
+        </div>
+      </div>
+
+      <div class="desktop-table">
+        <table>
+          <thead>
+            <tr>
+              <th>警備員番号</th>
+              <th>氏名</th>
+              <th>日勤希望</th>
+              <th>夜勤希望</th>
+              <th>状況</th>
+              <th>備考</th>
+              <th>郵便番号</th>
+              <th>住所</th>
+              <th>メールアドレス</th>
+            </tr>
+          </thead>
+          <tbody id="adminTableBody"></tbody>
+        </table>
+      </div>
+      <div id="adminCards" class="admin-cards"></div>
+    </section>
+  </main>
+
+  <div id="shiftModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <h2 id="modalTitle"></h2>
+      <div id="modalLockNote" class="lock-note" hidden></div>
+      <div class="choice-grid">
+        <button id="choiceDay" class="choice day" type="button" aria-pressed="false">日勤を希望する</button>
+        <button id="choiceNight" class="choice night" type="button" aria-pressed="false">夜勤を希望する</button>
+        <button id="choiceUnavailable" class="choice unavailable" type="button" aria-pressed="false">勤務できない</button>
+        <button id="choiceUndecided" class="choice undecided" type="button" aria-pressed="false">まだ分からない</button>
+      </div>
+      <label for="shiftNote">備考</label>
+      <textarea id="shiftNote" placeholder="例：国分寺駅周辺を希望、午後8時以降なら勤務可能、この日は遠方勤務不可"></textarea>
+      <div class="actions">
+        <button id="saveShiftButton" type="button">保存する</button>
+        <button id="closeShiftButton" class="secondary" type="button">変更せず閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
