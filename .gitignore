@@ -67,3 +67,5 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+# Local security audit notes
+firestore-rules-audit.local.md

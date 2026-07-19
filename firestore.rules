@@ -1,18 +1,143 @@
-rules_version='2'
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // users/{uid}: employeeNumber, name, email, postalCode, prefecture,
+    // city, addressLine, building, nearestStation, branchId, role,
+    // accountStatus (strings), createdAt, updatedAt (timestamps).
+    // availability/{date_uid}: uid, date (YYYY-MM-DD), day, night,
+    // unavailable, undecided (bool), note (string), createdAt, updatedAt.
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isAuthenticated() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function uidUnchanged() {
+      return request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return request.resource.data.uid == resource.data.uid;
+    }
+
+    function validText(value, minSize, maxSize) {
+      return value is string && value.size() >= minSize && value.size() <= maxSize;
+    }
+
+    function isValidEmail(value) {
+      return validText(value, 3, 254)
+        && value.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll([
+          'employeeNumber', 'name', 'email', 'postalCode', 'prefecture',
+          'city', 'addressLine', 'building', 'nearestStation', 'branchId',
+          'role', 'accountStatus', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'employeeNumber', 'name', 'email', 'postalCode', 'prefecture',
+          'city', 'addressLine', 'building', 'nearestStation', 'branchId',
+          'role', 'accountStatus', 'createdAt', 'updatedAt'
+        ])
+        && data.employeeNumber is string
+        && data.employeeNumber.matches('^[0-9]{6}$')
+        && validText(data.name, 1, 80)
+        && isValidEmail(data.email)
+        && data.email == request.auth.token.email
+        && data.postalCode is string
+        && data.postalCode.matches('^[0-9]{7}$')
+        && validText(data.prefecture, 1, 20)
+        && validText(data.city, 1, 80)
+        && validText(data.addressLine, 1, 160)
+        && validText(data.building, 0, 160)
+        && validText(data.nearestStation, 0, 80)
+        && data.branchId == 'kokubunji'
+        && data.role == 'guard'
+        && data.accountStatus == 'active'
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validAvailabilityChoice(data) {
+      return (data.unavailable == false || (data.day == false && data.night == false && data.undecided == false))
+        && (data.undecided == false || (data.day == false && data.night == false && data.unavailable == false));
+    }
+
+    function isValidAvailability(data, availabilityId) {
+      return data.keys().hasAll([
+          'uid', 'date', 'day', 'night', 'unavailable', 'undecided',
+          'note', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'date', 'day', 'night', 'unavailable', 'undecided',
+          'note', 'createdAt', 'updatedAt'
+        ])
+        && data.uid is string
+        && data.uid == request.auth.uid
+        && data.date is string
+        && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && availabilityId == data.date + '_' + data.uid
+        && data.day is bool
+        && data.night is bool
+        && data.unavailable is bool
+        && data.undecided is bool
+        && validAvailabilityChoice(data)
+        && validText(data.note, 0, 500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId)
+        && isValidUser(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow read: if isVerified() && isOwner(userId);
+
+      allow update: if isVerified()
+        && isOwner(userId)
+        && isValidUser(request.resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'branchId', 'accountStatus', 'createdAt'])
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    match /availability/{availabilityId} {
+      allow create: if isVerified()
+        && uidUnchanged()
+        && isValidAvailability(request.resource.data, availabilityId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow read: if isVerified() && isDocOwner();
+
+      allow update: if isVerified()
+        && isDocOwner()
+        && uidNotModified()
+        && isValidAvailability(request.resource.data, availabilityId)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+    }
+
     match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 8, 18);
+      allow read, write: if false;
     }
   }
 }
