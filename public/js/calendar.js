@@ -168,7 +168,7 @@ async function save() {
   if (lock.nightLocked) next.night = existing.night;
   el.saveShiftButton.disabled = true;
   try {
-    await saveAvailability(state.profile.uid, state.selectedDate, next);
+    await saveAvailability(state.profile.uid, state.selectedDate, next, state.profile.branchId);
     closeModal();
     renderCalendar();
     notify("勤務希望を保存しました。");

@@ -22,11 +22,12 @@ export function getAvailability(date) {
   return availabilityByDate.get(date) || null;
 }
 
-export async function saveAvailability(uid, date, values) {
+export async function saveAvailability(uid, date, values, branchId = "kokubunji") {
   const reference = doc(db, "availability", `${date}_${uid}`);
   const previous = availabilityByDate.get(date);
   const data = {
     uid,
+    branchId,
     date,
     day: Boolean(values.day),
     night: Boolean(values.night),

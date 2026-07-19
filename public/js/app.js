@@ -1,7 +1,7 @@
 import {
   friendlyAuthError,
   loadOwnProfile,
-  loginWithEmail,
+  loginWithEmployeeNumber,
   logout,
   observeAuthState,
   registerGuard,
@@ -11,14 +11,15 @@ import {
 } from "./auth.js";
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
 import { initCalendar, showCalendar } from "./calendar.js";
-import { disableAdminScreen } from "./admin.js";
+import { initAdmin, showAdmin } from "./admin.js";
 
 const el = {};
 let toastTimer;
+let signedInProfile;
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
-  disableAdminScreen(el);
+  initAdmin(el, showScreen);
   initCalendar(el, showToast);
   bindEvents();
   observeAuthState(handleAuthState);
@@ -27,13 +28,16 @@ document.addEventListener("DOMContentLoaded", () => {
 function cacheElements() {
   [
     "loginScreen", "registerScreen", "verifyEmailScreen", "calendarScreen", "adminScreen",
-    "loginMessage", "registerMessage", "verifyEmailMessage", "loginEmail", "loginPassword",
+    "loginMessage", "registerMessage", "verifyEmailMessage", "loginEmployeeNumber", "loginPassword",
     "loginButton", "showRegisterButton", "resetPasswordButton", "regGuardId", "regName",
     "regEmail", "regZip", "regPref", "regCity", "regStreet", "regBuilding", "regNearestStation",
     "regPassword", "regPasswordConfirm", "registerButton", "backLoginButton",
     "checkVerificationButton", "resendVerificationButton", "verifyLogoutButton",
     "currentUserName", "currentUserId", "logoutButton", "prevMonthButton", "nextMonthButton",
-    "todayButton", "monthLabel", "calendarGrid", "shiftModalBackdrop", "modalTitle",
+    "todayButton", "monthLabel", "calendarGrid", "openAdminButton", "openCalendarButton",
+    "adminDateLabel", "adminDate", "adminSearch", "adminSearchButton", "adminClearButton",
+    "adminFilters", "adminTableBody", "adminCards", "adminPrevDay", "adminToday", "adminNextDay", "adminLogout",
+    "shiftModalBackdrop", "modalTitle",
     "modalLockNote", "choiceDay", "choiceNight", "choiceUnavailable", "choiceUndecided",
     "shiftNote", "saveShiftButton", "closeShiftButton", "toast"
   ].forEach(id => { el[id] = document.getElementById(id); });
@@ -50,6 +54,13 @@ function bindEvents() {
   el.verifyLogoutButton.addEventListener("click", signOutUser);
   el.checkVerificationButton.addEventListener("click", checkVerification);
   el.resendVerificationButton.addEventListener("click", resendVerification);
+  el.openAdminButton.addEventListener("click", () => showAdmin());
+  el.openCalendarButton.addEventListener("click", async () => {
+    await loadOwnAvailability(signedInProfile.uid);
+    showScreen("calendar");
+    showCalendar(signedInProfile);
+  });
+  el.adminLogout.addEventListener("click", signOutUser);
 }
 
 async function handleAuthState(user) {
@@ -59,7 +70,6 @@ async function handleAuthState(user) {
     showScreen("login");
     return;
   }
-  el.loginEmail.value = user.email || "";
   if (!user.emailVerified) {
     showScreen("verify");
     showMessage(el.verifyEmailMessage, `${user.email} 宛ての確認メールをご確認ください。`, false);
@@ -67,15 +77,24 @@ async function handleAuthState(user) {
   }
   try {
     const profile = await loadOwnProfile(user);
+    signedInProfile = profile;
     if (profile.accountStatus !== "active") {
       showScreen("login");
       showMessage(el.loginMessage, "このアカウントは現在利用できません。管理者へ連絡してください。", true);
       await logout();
       return;
     }
-    await loadOwnAvailability(user.uid);
-    showScreen("calendar");
-    showCalendar(profile);
+    const token = await user.getIdTokenResult(true);
+    const role = token.claims.role || profile.role;
+    if (role === "staff" || role === "admin") {
+      el.openAdminButton.hidden = false;
+      await showAdmin(profile, token.claims);
+    } else {
+      el.openAdminButton.hidden = true;
+      await loadOwnAvailability(user.uid);
+      showScreen("calendar");
+      showCalendar(profile);
+    }
   } catch (error) {
     console.error(error);
     showScreen("login");
@@ -85,18 +104,18 @@ async function handleAuthState(user) {
 
 async function login() {
   clearMessage(el.loginMessage);
-  const email = el.loginEmail.value.trim();
+  const employeeNumber = el.loginEmployeeNumber.value.trim();
   const password = el.loginPassword.value;
-  if (!email || !password) {
-    showMessage(el.loginMessage, "メールアドレスとパスワードを入力してください。", true);
+  if (!/^\d{6}$/.test(employeeNumber) || !password) {
+    showMessage(el.loginMessage, "警備員番号またはパスワードが正しくありません", true);
     return;
   }
   await runButtonTask(el.loginButton, async () => {
     try {
-      await loginWithEmail(email, password);
+      await loginWithEmployeeNumber(employeeNumber, password);
       showToast("ログインしました。");
     } catch (error) {
-      showMessage(el.loginMessage, friendlyAuthError(error), true);
+      showMessage(el.loginMessage, "警備員番号またはパスワードが正しくありません", true);
     }
   });
 }
@@ -145,10 +164,9 @@ function validateRegistration(form, confirmation) {
 
 async function resetPassword() {
   clearMessage(el.loginMessage);
-  const email = el.loginEmail.value.trim();
+  const email = window.prompt("登録済みのメールアドレスを入力してください。", "")?.trim();
   if (!email) {
     showMessage(el.loginMessage, "先にメールアドレスを入力してください。", true);
-    el.loginEmail.focus();
     return;
   }
   await runButtonTask(el.resetPasswordButton, async () => {
@@ -212,6 +230,7 @@ function showScreen(name) {
     register: el.registerScreen,
     verify: el.verifyEmailScreen,
     calendar: el.calendarScreen
+    ,admin: el.adminScreen
   };
   [el.loginScreen, el.registerScreen, el.verifyEmailScreen, el.calendarScreen, el.adminScreen]
     .forEach(screen => screen?.classList.remove("active"));

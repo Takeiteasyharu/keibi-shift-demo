@@ -1,10 +1,9 @@
-import { auth, db } from "./firebase-config.js";
+import { auth, db, functions } from "./firebase-config.js";
 import {
-  createUserWithEmailAndPassword,
   onAuthStateChanged,
   sendEmailVerification,
   sendPasswordResetEmail,
-  signInWithEmailAndPassword,
+  signInWithCustomToken,
   signOut
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import {
@@ -13,6 +12,7 @@ import {
   serverTimestamp,
   setDoc
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
 
 const authMessages = {
   "auth/email-already-in-use": "このメールアドレスは既に登録されています。",
@@ -28,36 +28,17 @@ export function friendlyAuthError(error) {
   return authMessages[error?.code] || "処理に失敗しました。通信状態を確認して、もう一度お試しください。";
 }
 
-export async function loginWithEmail(email, password) {
-  return signInWithEmailAndPassword(auth, email.trim(), password);
+export async function loginWithEmployeeNumber(employeeNumber, password) {
+  const callable = httpsCallable(functions, "loginWithEmployeeNumber");
+  const result = await callable({ employeeNumber, password });
+  return signInWithCustomToken(auth, result.data.customToken);
 }
 
 export async function registerGuard(form) {
-  const credential = await createUserWithEmailAndPassword(auth, form.email, form.password);
-  const user = credential.user;
-  try {
-    await setDoc(doc(db, "users", user.uid), {
-      employeeNumber: form.employeeNumber,
-      name: form.name,
-      email: user.email,
-      postalCode: form.postalCode,
-      prefecture: form.prefecture,
-      city: form.city,
-      addressLine: form.addressLine,
-      building: form.building,
-      nearestStation: form.nearestStation,
-      branchId: "kokubunji",
-      role: "guard",
-      accountStatus: "active",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    await sendEmailVerification(user);
-    return user;
-  } catch (error) {
-    await signOut(auth);
-    throw error;
-  }
+  const callable = httpsCallable(functions, "registerDemoGuard");
+  const result = await callable(form);
+  const credential = await signInWithCustomToken(auth, result.data.customToken);
+  return credential.user;
 }
 
 export function sendVerification() {
