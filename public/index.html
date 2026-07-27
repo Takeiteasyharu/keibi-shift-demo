@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="./css/style.css?v=20260727-4">
 </head>
 <body>
   <main class="app">
@@ -28,23 +28,10 @@
         <div class="actions">
           <button id="loginButton" type="button">ログインする</button>
           <button id="showRegisterButton" class="secondary" type="button">デモ用の新規登録</button>
-          <button id="resetPasswordButton" class="neutral" type="button">パスワードを再設定する</button>
+          <button id="forgotPasswordButton" class="neutral" type="button">パスワードを忘れた場合</button>
         </div>
       </div>
 
-    </section>
-
-    <section id="verifyEmailScreen" class="screen" aria-labelledby="verifyEmailTitle">
-      <h1 id="verifyEmailTitle" class="top-title">メールアドレスの確認</h1>
-      <div id="verifyEmailMessage" class="message" role="alert"></div>
-      <div class="panel">
-        <p class="large-help">確認メール内のリンクを押した後、「確認できたか調べる」を押してください。</p>
-        <div class="actions">
-          <button id="checkVerificationButton" type="button">確認できたか調べる</button>
-          <button id="resendVerificationButton" class="neutral" type="button">確認メールをもう一度送る</button>
-          <button id="verifyLogoutButton" class="secondary" type="button">ログアウト</button>
-        </div>
-      </div>
     </section>
 
     <section id="registerScreen" class="screen" aria-labelledby="registerTitle">
@@ -98,6 +85,14 @@
             <input id="regPasswordConfirm" type="password" autocomplete="new-password">
           </div>
         </div>
+        <div class="staff-request-option">
+          <label class="checkbox-label"><input id="regStaffRequested" type="checkbox"> 内勤者登録を希望する</label>
+          <p class="small-text">通常警備員は記入する必要はありません。</p>
+          <div id="staffRequestFields" class="form-grid" hidden>
+            <div><label for="regStaffName">氏名</label><input id="regStaffName" type="text"></div>
+            <div><label for="regStaffBranch">所属支社</label><input id="regStaffBranch" type="text" value="kokubunji"></div>
+          </div>
+        </div>
         <div class="actions">
           <button id="registerButton" type="button">登録する</button>
           <button id="backLoginButton" class="secondary" type="button">ログイン画面へ戻る</button>
@@ -113,7 +108,7 @@
         </div>
         <div class="actions">
           <button id="logoutButton" class="secondary" type="button">ログアウト</button>
-          <button id="openAdminButton" class="neutral" type="button" hidden>内勤者用管理画面を開く</button>
+          <button id="openAdminButton" class="menu-button" type="button" aria-label="メニューを開く" hidden>≡</button>
         </div>
       </div>
 
@@ -157,8 +152,7 @@
           <button id="adminPrevDay" class="secondary" type="button">前の日</button>
           <button id="adminToday" class="neutral" type="button">今日</button>
           <button id="adminNextDay" class="secondary" type="button">次の日</button>
-          <button id="adminLogout" class="secondary" type="button">ログアウト</button>
-          <button id="openCalendarButton" class="neutral" type="button">警備員用画面を開く</button>
+          <button id="menuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
         </div>
       </div>
 
@@ -203,7 +197,8 @@
               <th>備考</th>
               <th>郵便番号</th>
               <th>住所</th>
-              <th>メールアドレス</th>
+              <th>最寄り駅</th>
+              <th>連絡用メール</th>
             </tr>
           </thead>
           <tbody id="adminTableBody"></tbody>
@@ -211,11 +206,37 @@
       </div>
       <div id="adminCards" class="admin-cards"></div>
     </section>
+
+    <section id="staffRequestsScreen" class="screen" aria-labelledby="staffRequestsTitle">
+      <div class="header"><h1 id="staffRequestsTitle">内勤者申請</h1>
+        <button id="requestsMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="staffRequestsMessage" class="message" role="alert"></div>
+      <div id="staffRequestsList" class="request-list"></div>
+    </section>
+
+    <section id="shiftBuilderScreen" class="screen" aria-labelledby="shiftBuilderTitle">
+      <div class="header"><div><h1 id="shiftBuilderTitle">シフト作成</h1><div class="user-line">隊長・隊員・現場情報を組み合わせて配置を作成します</div></div>
+        <button id="shiftBuilderMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div class="panel shift-toolbar">
+        <button id="shiftPrevDay" class="secondary" type="button">前の日</button>
+        <label>選択中の日付<input id="shiftBuilderDate" type="date"></label>
+        <button id="shiftToday" class="neutral" type="button">今日</button>
+        <button id="shiftNextDay" class="secondary" type="button">次の日</button>
+        <button id="shiftTypeDay" type="button" class="active">日勤</button>
+        <button id="shiftTypeNight" class="secondary" type="button">夜勤</button>
+      </div>
+      <div id="shiftBuilderMessage" class="message" role="alert"></div>
+      <div id="shiftGroupsList" class="shift-groups"></div>
+      <button id="newShiftGroupButton" class="wide-action" type="button">＋ 新しいグループを作成</button>
+    </section>
   </main>
 
   <div id="shiftModalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
       <h2 id="modalTitle"></h2>
+      <div id="confirmedShiftDetails" class="confirmed-shift-details" hidden></div>
       <div id="modalLockNote" class="lock-note" hidden></div>
       <div class="choice-grid">
         <button id="choiceDay" class="choice day" type="button" aria-pressed="false">日勤を希望する</button>
@@ -233,7 +254,72 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="sideMenuBackdrop" class="side-menu-backdrop">
+    <nav id="sideMenu" class="side-menu" aria-label="内勤者メニュー">
+      <button id="closeMenuButton" class="secondary" type="button">閉じる</button>
+      <button id="menuAdminButton" type="button">管理画面</button>
+      <button id="menuShiftBuilderButton" type="button">シフト作成</button>
+      <button id="menuCalendarButton" type="button">自分の勤務希望</button>
+      <button id="menuRequestsButton" type="button">内勤者申請</button>
+      <button id="menuLogoutButton" class="secondary" type="button">ログアウト</button>
+    </nav>
+  </div>
 
-  <script type="module" src="./js/app.js"></script>
+  <div id="shiftGroupModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shiftGroupModalTitle">
+    <div class="modal shift-editor">
+      <div class="shift-editor-header">
+        <h2 id="shiftGroupModalTitle">新しいグループ</h2>
+        <div class="shift-editor-top-actions">
+          <button id="confirmShiftTopButton" type="button">シフトを確定する</button>
+          <button id="closeShiftGroupTopButton" class="secondary" type="button">変更せず閉じる</button>
+        </div>
+      </div>
+      <div class="member-section-heading">
+        <h3>1. メンバーを追加</h3>
+        <label class="checkbox-label"><input id="showOutsideAvailability" type="checkbox">すべての未配置警備員を表示</label>
+      </div>
+      <input id="memberSearch" placeholder="氏名・警備員番号で検索"><div id="memberCandidates" class="candidate-list"></div>
+      <h3>選択済みメンバー</h3><div id="selectedMembersList" class="selected-members"></div>
+      <h3>2. グループ情報</h3>
+      <div class="form-grid">
+        <label>グループタイトル（必須）<input id="shiftGroupTitle" maxlength="80" required></label>
+        <label class="full">現場住所（必須）<input id="shiftAddress" maxlength="150" required></label>
+        <label>勤務開始時刻（必須）
+          <span class="time-select-row">
+            <select id="shiftStartHour" aria-label="勤務開始時刻の時"></select>
+            <span>時</span>
+            <select id="shiftStartMinute" aria-label="勤務開始時刻の分">
+              <option value="00">00</option><option value="15">15</option>
+              <option value="30">30</option><option value="45">45</option>
+            </select>
+            <span>分</span>
+          </span>
+        </label>
+        <label>必要人数（必須）
+          <span class="number-picker-wrap">
+            <input id="shiftRequiredMembers" type="number" min="1" max="99" placeholder="人数を入力" required>
+            <button id="requiredMembersPickerButton" class="number-picker-button secondary" type="button" aria-expanded="false" aria-label="1人から10人を選択">▼</button>
+            <span id="requiredMembersOptions" class="number-picker-options" hidden></span>
+          </span>
+        </label>
+        <label class="full">備考（任意）<textarea id="shiftGroupNote" maxlength="500" placeholder="現場や配置についての備考"></textarea></label>
+      </div>
+      <h3>3. 隊長を選択</h3><p class="small-text">選択済みメンバーから1名だけ選択できます。隊長は未選択でも保存できます。</p>
+      <div id="leaderChoices" class="leader-choices"></div>
+      <button id="clearLeaderButton" class="secondary" type="button">隊長選択を解除</button>
+      <div id="groupCompletionMessage" class="completion-warning" role="status"></div>
+      <div class="actions"><button id="confirmShiftButton" type="button">シフトを確定する</button><button id="closeShiftGroupButton" class="secondary" type="button">変更せず閉じる</button></div>
+    </div>
+  </div>
+
+  <div id="availabilityNotePanel" class="note-panel-backdrop" role="dialog" aria-modal="true" aria-labelledby="availabilityNoteTitle">
+    <div class="availability-note-panel">
+      <button id="closeAvailabilityNotePanel" class="note-panel-close" type="button" aria-label="備考を閉じる">×</button>
+      <h2 id="availabilityNoteTitle">勤務希望の備考</h2>
+      <div id="availabilityNoteFullText"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js?v=20260727-4"></script>
 </body>
 </html>

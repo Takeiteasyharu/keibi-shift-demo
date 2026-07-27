@@ -1,71 +1,71 @@
-import { auth, db, functions } from "./firebase-config.js";
+import { auth, db } from "./firebase-config.js";
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithCustomToken,
+  signInWithEmailAndPassword,
   signOut
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import {
   doc,
   getDoc,
+  onSnapshot,
   serverTimestamp,
-  setDoc
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
-import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
 
-const authMessages = {
-  "auth/email-already-in-use": "このメールアドレスは既に登録されています。",
-  "auth/invalid-credential": "メールアドレスまたはパスワードが正しくありません。",
-  "auth/invalid-email": "メールアドレスの形式が正しくありません。",
-  "auth/missing-password": "パスワードを入力してください。",
-  "auth/too-many-requests": "操作回数が多すぎます。しばらく待ってからお試しください。",
-  "auth/weak-password": "パスワードは6文字以上で入力してください。"
-};
-
-export function friendlyAuthError(error) {
-  console.error(error);
-  return authMessages[error?.code] || "処理に失敗しました。通信状態を確認して、もう一度お試しください。";
+export function createInternalAuthEmail(employeeNumber) {
+  return `keibi-${employeeNumber}@auth.keibi.invalid`;
 }
 
-export async function loginWithEmployeeNumber(employeeNumber, password) {
-  const callable = httpsCallable(functions, "loginWithEmployeeNumber");
-  const result = await callable({ employeeNumber, password });
-  return signInWithCustomToken(auth, result.data.customToken);
+export function loginWithEmployeeNumber(employeeNumber, password) {
+  return signInWithEmailAndPassword(auth, createInternalAuthEmail(employeeNumber), password);
 }
 
 export async function registerGuard(form) {
-  const callable = httpsCallable(functions, "registerDemoGuard");
-  const result = await callable(form);
-  const credential = await signInWithCustomToken(auth, result.data.customToken);
-  return credential.user;
+  const credential = await createUserWithEmailAndPassword(
+    auth, createInternalAuthEmail(form.employeeNumber), form.password
+  );
+  const user = credential.user;
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+  batch.set(doc(db, "employeeNumbers", form.employeeNumber), { uid: user.uid });
+  batch.set(doc(db, "users", user.uid), {
+    employeeNumber: form.employeeNumber, name: form.name, contactEmail: form.email,
+    postalCode: form.postalCode, prefecture: form.prefecture, city: form.city,
+    addressLine: form.addressLine, building: form.building,
+    nearestStation: form.nearestStation, branchId: "kokubunji",
+    createdAt: now, updatedAt: now
+  });
+  batch.set(doc(db, "userRoles", user.uid), {
+    role: "guard", branchId: "kokubunji", accountStatus: "active",
+    leaderEligible: false, createdAt: now, updatedAt: now
+  });
+  if (form.staffRequested) {
+    batch.set(doc(db, "staffRequests", user.uid), {
+      uid: user.uid, employeeNumber: form.employeeNumber,
+      name: form.staffRequestName, branchId: form.staffRequestBranch,
+      status: "pending", createdAt: now, updatedAt: now
+    });
+  }
+  try {
+    await batch.commit();
+    return user;
+  } catch (error) {
+    await deleteUser(user).catch(() => undefined);
+    throw error;
+  }
 }
 
-export function sendVerification() {
-  if (!auth.currentUser) throw new Error("ログインが必要です。");
-  return sendEmailVerification(auth.currentUser);
+export function logout() { return signOut(auth); }
+export function observeAuthState(callback) { return onAuthStateChanged(auth, callback); }
+export function observeOwnRole(uid, callback, onError) {
+  return onSnapshot(doc(db, "userRoles", uid),
+    snapshot => callback(snapshot.exists() ? snapshot.data() : null), onError);
 }
-
-export function sendPasswordReset(email) {
-  return sendPasswordResetEmail(auth, email.trim());
-}
-
-export function logout() {
-  return signOut(auth);
-}
-
-export async function reloadCurrentUser() {
-  if (!auth.currentUser) return null;
-  await auth.currentUser.reload();
-  return auth.currentUser;
-}
-
 export async function loadOwnProfile(user) {
   const snapshot = await getDoc(doc(db, "users", user.uid));
-  if (!snapshot.exists()) throw new Error("利用者情報が見つかりません。管理者へ連絡してください。");
-  return { uid: user.uid, ...snapshot.data() };
-}
-
-export function observeAuthState(callback) {
-  return onAuthStateChanged(auth, callback);
+  if (!snapshot.exists()) throw new Error("利用者情報が見つかりません。");
+  // Authentication UID is authoritative even if a legacy profile contains a uid field.
+  return { ...snapshot.data(), uid: user.uid };
 }

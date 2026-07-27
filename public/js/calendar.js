@@ -17,6 +17,11 @@ const state = {
 };
 let el;
 let notify;
+let confirmedByDate = new Map();
+
+export function setConfirmedShifts(items = []) {
+  confirmedByDate = new Map(items.map(item => [item.date, item]));
+}
 
 export function initCalendar(elements, showToast) {
   el = elements;
@@ -86,7 +91,8 @@ export function renderCalendar() {
       button.appendChild(holiday);
     }
 
-    const status = getStatus(getAvailability(dateKey));
+    const confirmed = confirmedByDate.get(dateKey);
+    const status = confirmed ? { key: "confirmed", label: "確定" } : getStatus(getAvailability(dateKey));
     const chip = document.createElement("span");
     chip.className = `status-chip status-${status.key}`;
     chip.textContent = status.label;
@@ -108,6 +114,9 @@ function openModal(dateKey) {
   state.selectedDate = dateKey;
   state.draft = normalizeAvailability(getAvailability(dateKey));
   el.modalTitle.textContent = `${formatDateLong(dateKey)}の勤務希望`;
+  const confirmed = confirmedByDate.get(dateKey);
+  el.confirmedShiftDetails.hidden = !confirmed;
+  if (confirmed) el.confirmedShiftDetails.textContent = `${confirmed.title}\n${confirmed.clientName}\n${confirmed.address}\n集合：${confirmed.meetingPlace || "―"} ${confirmed.meetingTime}\n勤務：${confirmed.startTime}～${confirmed.endTime}\n役割：${confirmed.leaderUid === state.profile.uid ? "隊長" : "隊員"}`;
   el.shiftNote.value = state.draft.note;
   const lock = getLockState(dateKey);
   const past = isPastDate(dateKey);
@@ -192,7 +201,7 @@ function getStatus(value) {
   const item = normalizeAvailability(value);
   if (item.unavailable) return { key: "unavailable", label: "不可" };
   if (item.undecided) return { key: "undecided", label: "未定" };
-  if (item.day && item.night) return { key: "both", label: "日勤・夜勤" };
+  if (item.day && item.night) return { key: "both", label: "日夜" };
   if (item.day) return { key: "day", label: "日勤" };
   if (item.night) return { key: "night", label: "夜勤" };
   return { key: "none", label: "未入力" };
@@ -207,9 +216,7 @@ export function getLockState(dateKey, now = new Date()) {
 }
 
 function lockMessageShort(lock) {
-  if (lock.dayLocked && lock.nightLocked) return "締切済み";
-  if (lock.dayLocked) return "日勤締切";
-  if (lock.nightLocked) return "夜勤締切";
+  if (lock.dayLocked || lock.nightLocked) return "締切";
   return "";
 }
 
