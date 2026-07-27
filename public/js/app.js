@@ -2,7 +2,7 @@ import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, obse
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260727-1";
 import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260727-4";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260727-3";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260727-5";
 
 const el = {};
 let toastTimer;
@@ -35,7 +35,7 @@ function cacheElements() {
    "menuAdminButton","menuCalendarButton","menuRequestsButton","menuLogoutButton",
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
    "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton",
-   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","confirmShiftTopButton","closeShiftGroupTopButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
+   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","confirmShiftTopButton","closeShiftGroupTopButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails",
    "choiceDay","choiceNight","choiceUnavailable","choiceUndecided","shiftNote","saveShiftButton",
    "closeShiftButton","toast"].forEach(id => { el[id] = document.getElementById(id); });

@@ -503,6 +503,17 @@
 .shift-editor-top-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; }
 .shift-editor-top-actions button { min-height:52px; font-size:17px; }
 .shift-editor h3 { font-size:24px; margin:22px 0 8px; }
+.member-search-row { display:grid; grid-template-columns:minmax(0,1fr) 64px; align-items:stretch; }
+.member-search-row input { border-radius:8px 0 0 8px; }
+.member-candidates-toggle {
+  width:64px !important;
+  min-width:64px;
+  min-height:56px;
+  padding:0;
+  border-radius:0 8px 8px 0;
+  font-size:26px;
+  line-height:1;
+}
 .candidate-list { display:grid; gap:8px; max-height:260px; overflow:auto; padding:10px; border:2px solid var(--line); border-radius:8px; margin:8px 0; }
 .candidate-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--line); border-radius:8px; font-size:18px; font-weight:700; }
 .candidate-main { display:flex; align-items:center; gap:12px; flex:1; margin:0; }

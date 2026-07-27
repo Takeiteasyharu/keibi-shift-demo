@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260727-4">
+  <link rel="stylesheet" href="./css/style.css?v=20260727-5">
 </head>
 <body>
   <main class="app">
@@ -278,7 +278,12 @@
         <h3>1. メンバーを追加</h3>
         <label class="checkbox-label"><input id="showOutsideAvailability" type="checkbox">すべての未配置警備員を表示</label>
       </div>
-      <input id="memberSearch" placeholder="氏名・警備員番号で検索"><div id="memberCandidates" class="candidate-list"></div>
+      <div class="member-search-row">
+        <input id="memberSearch" placeholder="氏名・警備員番号で検索">
+        <button id="memberCandidatesToggle" class="member-candidates-toggle secondary" type="button"
+          aria-label="勤務可能な未配置警備員の一覧を開く" aria-expanded="false">▼</button>
+      </div>
+      <div id="memberCandidates" class="candidate-list" hidden></div>
       <h3>選択済みメンバー</h3><div id="selectedMembersList" class="selected-members"></div>
       <h3>2. グループ情報</h3>
       <div class="form-grid">
@@ -320,6 +325,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260727-4"></script>
+  <script type="module" src="./js/app.js?v=20260727-5"></script>
 </body>
 </html>

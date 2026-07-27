@@ -10,6 +10,7 @@ let groups = [];
 let selectedLeader = null;
 let selectedMembers = new Set();
 let profileNames = new Map();
+let candidatesExpanded = false;
 
 export async function loadOwnConfirmedShifts(uid) {
   const base = collection(db, "shiftGroups");
@@ -63,8 +64,18 @@ export function initShifts(elements, showScreen, notify) {
   el.availabilityNotePanel.addEventListener("click", event => {
     if (event.target === el.availabilityNotePanel) closeAvailabilityNote();
   });
-  el.memberSearch.addEventListener("input", renderCandidates);
-  el.showOutsideAvailability.addEventListener("change", renderCandidates);
+  el.memberSearch.addEventListener("input", () => {
+    if (el.memberSearch.value.trim()) setCandidatesExpanded(true);
+    renderCandidates();
+  });
+  el.memberCandidatesToggle.addEventListener("click", () => {
+    setCandidatesExpanded(!candidatesExpanded);
+    renderCandidates();
+  });
+  el.showOutsideAvailability.addEventListener("change", () => {
+    if (el.showOutsideAvailability.checked) setCandidatesExpanded(true);
+    renderCandidates();
+  });
   el.clearLeaderButton.addEventListener("click", () => {
     selectedLeader = null;
     renderSelectedMembers();
@@ -120,9 +131,9 @@ async function renderGroups() {
         <span class="completion-badge ${issues.length ? "is-incomplete" : "is-complete"}">${issues.length ? "未完成" : "入力完了"}</span>
       </div>
       <div>${safe(group.address || "現場住所未入力")}</div>
-      <div>勤務：${safe(group.startTime || "開始時刻未入力")}～${safe(group.endTime || "終了未定")}</div>
+      <div>勤務開始：${safe(displayStartTime(group.startTime) || "開始時刻未入力")}</div>
       <div>隊長：${safe(group.leaderUid ? nameOf(group.leaderUid) : "未選択")}　配置人数：${group.memberUids.length}人</div>
-      <div>保存状態：${group.status === "confirmed" ? "確定" : "下書き"}</div>
+      <div>備考：${safe(group.note || "なし")}</div>
       ${issues.length ? `<div class="incomplete-summary"><strong>未入力項目があります</strong><ul>${visibleIssues.map(issue => `<li>${safe(issue)}</li>`).join("")}</ul>${remaining > 0 ? `<div>ほか${remaining}件</div>` : ""}</div>` : ""}
     `;
     const actions = document.createElement("div");
@@ -165,6 +176,7 @@ async function openEditor(group = null) {
   closeRequiredMembersOptions();
   el.memberSearch.value = "";
   el.showOutsideAvailability.checked = false;
+  setCandidatesExpanded(false);
   el.shiftGroupModalTitle.textContent = normalized ? "グループを編集" : "新しいグループ";
   el.shiftGroupModal.classList.add("show");
   const editor = el.shiftGroupModal.querySelector(".shift-editor");
@@ -232,6 +244,24 @@ function renderCandidates() {
   });
   if (!members.length) el.memberCandidates.textContent = "条件に一致する未配置警備員がいません。";
   renderSelectedMembers();
+}
+
+function setCandidatesExpanded(expanded) {
+  candidatesExpanded = expanded;
+  el.memberCandidates.hidden = !expanded;
+  el.memberCandidatesToggle.textContent = expanded ? "▲" : "▼";
+  el.memberCandidatesToggle.setAttribute("aria-expanded", String(expanded));
+  el.memberCandidatesToggle.setAttribute(
+    "aria-label",
+    expanded ? "未配置警備員の一覧を閉じる" : "勤務可能な未配置警備員の一覧を開く"
+  );
+}
+
+function displayStartTime(value) {
+  if (!value) return "";
+  const [hour, minute = "00"] = value.split(":");
+  const numericHour = Number(hour);
+  return `${Number.isFinite(numericHour) ? numericHour : hour}:${minute}`;
 }
 
 function renderSelectedMembers() {
