@@ -2,7 +2,7 @@ import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, obse
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260727-1";
 import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260727-4";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260727-5";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260727-6";
 
 const el = {};
 let toastTimer;

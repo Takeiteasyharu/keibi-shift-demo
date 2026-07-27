@@ -69,11 +69,13 @@ export function initShifts(elements, showScreen, notify) {
     renderCandidates();
   });
   el.memberCandidatesToggle.addEventListener("click", () => {
-    setCandidatesExpanded(!candidatesExpanded);
+    const expanding = !candidatesExpanded;
+    if (!expanding) el.showOutsideAvailability.checked = false;
+    setCandidatesExpanded(expanding);
     renderCandidates();
   });
   el.showOutsideAvailability.addEventListener("change", () => {
-    if (el.showOutsideAvailability.checked) setCandidatesExpanded(true);
+    setCandidatesExpanded(el.showOutsideAvailability.checked);
     renderCandidates();
   });
   el.clearLeaderButton.addEventListener("click", () => {
@@ -308,8 +310,9 @@ function candidateRow(person, checked, onChange) {
   input.type = "checkbox";
   input.checked = checked;
   input.addEventListener("change", onChange);
+  const requestedShift = person.wants ? (type() === "day" ? "日勤" : "夜勤") : "希望なし";
   label.append(input, document.createTextNode(
-    `${person.name}／${person.employeeNumber}／${person.wants ? "希望あり" : "希望外"}／最寄り駅 ${person.nearestStation || "―"}`
+    `${person.name}／${person.employeeNumber}／${requestedShift}／最寄り駅 ${person.nearestStation || "―"}`
   ));
   row.appendChild(label);
   if (person.availabilityNote) {
@@ -400,20 +403,14 @@ async function saveGroup(status, notify) {
     alert("必要人数は1～99人で入力してください。");
     return;
   }
-  const requiredErrors = [];
-  if (!data.title) requiredErrors.push("グループタイトル");
-  if (!data.address) requiredErrors.push("現場住所");
-  if (!data.startTime) requiredErrors.push("勤務開始時刻");
-  if (data.requiredMembers === null) requiredErrors.push("必要人数");
-  if (requiredErrors.length) {
-    alert(`次の必須項目を入力してください。\n${requiredErrors.join("\n")}`);
-    return;
-  }
   const outside = candidates.filter(person => data.memberUids.includes(person.uid) && !person.wants);
   if (outside.length && !confirm("希望していない勤務帯の警備員が含まれます。それでも配置しますか？")) return;
   const issues = incompleteIssues(data);
+  const incompleteConfirmation = editingId
+    ? "未入力または未設定の項目があります。このまま変更を確定しますか？"
+    : "未入力または未設定の項目がありますが、グループを作成しますか？";
   if (status === "confirmed" && issues.length &&
-      !confirm(`未入力または未設定の項目があります。このまま確定しますか？\n\n${issues.join("\n")}`)) return;
+      !confirm(`${incompleteConfirmation}\n\n${issues.join("\n")}`)) return;
   if (status === "confirmed" && !issues.length &&
       !confirm(`${data.date} ${data.shiftType === "day" ? "日勤" : "夜勤"}\n${data.title}\n${data.memberUids.length}名で確定しますか？`)) return;
 
