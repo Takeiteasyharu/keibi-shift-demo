@@ -94,17 +94,33 @@ async function renderAdmin() {
     const status = shift.unavailable ? "勤務不可" : shift.undecided ? "未定" :
       shift.day && shift.night ? "日勤・夜勤" : shift.day ? "日勤" : shift.night ? "夜勤" : "未入力";
     const updateType = shift.updatedByType === "staff" ? "代理入力" : shift.updatedByType === "self" ? "本人入力" : "記録なし";
-    const values = [user.employeeNumber, null, shift.day ? "○" : "―", shift.night ? "○" : "―",
-      status, shift.note || "", user.postalCode, `${user.prefecture}${user.city}${user.addressLine}${user.building || ""}`,
-      user.nearestStation || "", user.contactEmail, updateType, null];
     const tr = document.createElement("tr");
-    values.forEach((value, index) => {
-      const td = document.createElement("td");
-      if (index === 1) appendRoleName(td, user);
-      else if (index === values.length - 1 && user.inputMode === "managed") td.appendChild(proxyButton(user));
-      else td.textContent = value;
-      tr.appendChild(td);
-    });
+    tr.className = "admin-summary-row";
+    const identityCell = document.createElement("td");
+    identityCell.append(
+      summaryLine(`警備員番号：${user.employeeNumber}`, "admin-summary-number"),
+      summaryRoleLine(user)
+    );
+    const wishCell = document.createElement("td");
+    wishCell.append(
+      summaryLine(status, "admin-summary-status"),
+      summaryLine(`日勤：${shift.day ? "○" : "―"}　夜勤：${shift.night ? "○" : "―"}`)
+    );
+    const noteCell = document.createElement("td");
+    noteCell.append(
+      summaryLine(`備考：${shift.note || "なし"}`),
+      summaryLine(`更新：${updateType}`, "admin-update-type")
+    );
+    const contactCell = document.createElement("td");
+    contactCell.append(
+      summaryLine(`〒${user.postalCode || "―"}　${user.prefecture || ""}${user.city || ""}${user.addressLine || ""}${user.building || ""}`),
+      summaryLine(`最寄り駅：${user.nearestStation || "―"}`),
+      summaryLine(`メール：${user.contactEmail || "―"}`)
+    );
+    const actionCell = document.createElement("td");
+    if (user.inputMode === "managed") actionCell.appendChild(proxyButton(user));
+    else actionCell.textContent = "―";
+    tr.append(identityCell, wishCell, noteCell, contactCell, actionCell);
     el.adminTableBody.appendChild(tr);
     const card = document.createElement("article");
     card.className = "admin-card";
@@ -119,7 +135,21 @@ async function renderAdmin() {
     if (user.inputMode === "managed") card.appendChild(proxyButton(user));
     el.adminCards.appendChild(card);
   });
-  if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="12">該当する利用者はいません</td></tr>';
+  if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="5">該当する利用者はいません</td></tr>';
+}
+
+function summaryLine(text, className = "") {
+  const line = document.createElement("div");
+  line.className = `admin-summary-line ${className}`.trim();
+  line.textContent = text;
+  return line;
+}
+
+function summaryRoleLine(user) {
+  const line = document.createElement("div");
+  line.className = "admin-summary-line admin-summary-name";
+  appendRoleName(line, user);
+  return line;
 }
 
 function proxyButton(user) {

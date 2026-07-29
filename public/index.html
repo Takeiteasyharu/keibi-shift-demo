@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260729-7">
+  <link rel="stylesheet" href="./css/style.css?v=20260730-2">
 </head>
 <body>
   <main class="app">
@@ -194,24 +194,29 @@
         <table>
           <thead>
             <tr>
-              <th>警備員番号</th>
-              <th>氏名</th>
-              <th>日勤希望</th>
-              <th>夜勤希望</th>
-              <th>状況</th>
-              <th>備考</th>
-              <th>郵便番号</th>
-              <th>住所</th>
-              <th>最寄り駅</th>
-              <th>連絡用メール</th>
-              <th>最終更新</th>
-              <th>代理入力</th>
+              <th>警備員</th>
+              <th>勤務希望</th>
+              <th>備考・更新方法</th>
+              <th>住所・連絡先</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody id="adminTableBody"></tbody>
         </table>
       </div>
       <div id="adminCards" class="admin-cards"></div>
+    </section>
+
+    <section id="ownShiftsScreen" class="screen" aria-labelledby="ownShiftsTitle">
+      <div class="header">
+        <div>
+          <h1 id="ownShiftsTitle">シフト確認</h1>
+          <div class="user-line">今日以降に確定している自分のシフト</div>
+        </div>
+        <button id="ownShiftsMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="ownShiftsMessage" class="message" role="status"></div>
+      <div id="ownShiftsList" class="own-shifts-list"></div>
     </section>
 
     <section id="proxyWorkerScreen" class="screen" aria-labelledby="proxyWorkerTitle">
@@ -347,6 +352,7 @@
       <button id="menuGuardManagementButton" type="button">警備員管理</button>
       <button id="menuProxyInputButton" type="button">勤務希望の代理入力</button>
       <button id="menuCalendarButton" type="button">自分の勤務希望</button>
+      <button id="menuOwnShiftsButton" type="button">自分のシフト</button>
       <button id="menuRequestsButton" type="button">内勤者申請</button>
       <button id="menuLogoutButton" class="secondary" type="button">ログアウト</button>
     </nav>
@@ -405,6 +411,16 @@
         <button id="draftShiftButton" class="secondary" type="button">下書きを保存</button>
         <button id="confirmShiftButton" type="button">シフトを確定する</button>
         <button id="closeShiftGroupButton" class="neutral" type="button">変更せず戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ownShiftDetailModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ownShiftDetailTitle">
+    <div class="modal own-shift-detail-modal">
+      <h2 id="ownShiftDetailTitle">シフト詳細</h2>
+      <div id="ownShiftDetailBody" class="own-shift-detail-body"></div>
+      <div class="actions">
+        <button id="closeOwnShiftDetailButton" class="secondary" type="button">閉じる</button>
       </div>
     </div>
   </div>
@@ -499,6 +515,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260729-7"></script>
+  <script type="module" src="./js/app.js?v=20260730-2"></script>
 </body>
 </html>

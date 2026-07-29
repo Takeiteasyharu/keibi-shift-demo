@@ -1,10 +1,11 @@
 import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard } from "./auth.js?v=20260722-3";
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
-import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260727-1";
-import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260727-4";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260729-5";
-import { initGuardManagement, showGuardManagement } from "./guard-management.js?v=20260729-2";
-import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260729-1";
+import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-1";
+import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260730-1";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260730-1";
+import { initGuardManagement, showGuardManagement } from "./guard-management.js?v=20260730-1";
+import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260730-1";
+import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260730-1";
 
 const el = {};
 let toastTimer;
@@ -21,12 +22,13 @@ document.addEventListener("DOMContentLoaded", () => {
   showShiftBuilder = initShifts(el, showScreen, showToast);
   initGuardManagement(el, showScreen, showToast, openProxyCalendar);
   initProxyInput(el, showScreen, openProxyCalendar);
+  initShiftConfirmation(el, showScreen);
   bindEvents();
   observeAuthState(handleAuthState);
 });
 
 function cacheElements() {
-  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen",
+  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
    "showRegisterButton","forgotPasswordButton","regGuardId","regName","regEmail","regZip",
    "regPref","regCity","regStreet","regBuilding","regNearestStation","regPassword",
@@ -35,8 +37,8 @@ function cacheElements() {
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
    "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
    "adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
-   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
-   "menuAdminButton","menuCalendarButton","menuRequestsButton","menuGuardManagementButton","menuProxyInputButton","menuLogoutButton",
+   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
+   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuRequestsButton","menuGuardManagementButton","menuProxyInputButton","menuLogoutButton",
    "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
    "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
    "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName",
@@ -44,6 +46,7 @@ function cacheElements() {
    "managedGuardNearestStation","managedGuardContactEmail","saveManagedGuardButton","cancelManagedGuardButton",
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
    "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
+   "ownShiftsMessage","ownShiftsList","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
    "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton",
    "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
@@ -67,7 +70,7 @@ function bindEvents() {
   el.registerButton.addEventListener("click", register);
   el.logoutButton.addEventListener("click", signOutUser);
   el.openAdminButton.addEventListener("click", openMenu);
-  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton]
+  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton]
     .forEach(button => button.addEventListener("click", openMenu));
   el.closeMenuButton.addEventListener("click", closeMenu);
   el.sideMenuBackdrop.addEventListener("click", event => { if (event.target === el.sideMenuBackdrop) closeMenu(); });
@@ -80,6 +83,10 @@ function bindEvents() {
   el.menuProxyInputButton.addEventListener("click", async () => {
     closeMenu();
     await showProxyWorkerList(profile, roleData);
+  });
+  el.menuOwnShiftsButton.addEventListener("click", () => {
+    closeMenu();
+    showOwnShifts(profile);
   });
   el.menuCalendarButton.addEventListener("click", async () => {
     closeMenu(); await loadOwnAvailability(profile.uid); showScreen("calendar"); showCalendar(profile);
@@ -112,13 +119,18 @@ async function handleRoleChange(nextRole) {
   }
   roleData = nextRole;
   const isOffice = ["staff", "admin"].includes(roleData.role);
-  el.openAdminButton.hidden = !isOffice;
+  el.openAdminButton.hidden = false;
+  el.menuAdminButton.hidden = !isOffice;
+  el.menuShiftBuilderButton.hidden = !isOffice;
   el.menuGuardManagementButton.hidden = !isOffice;
   el.menuProxyInputButton.hidden = !isOffice;
+  el.menuRequestsButton.hidden = !isOffice;
+  el.menuCalendarButton.textContent = isOffice ? "自分の勤務希望" : "勤務希望入力";
+  el.menuOwnShiftsButton.textContent = isOffice ? "自分のシフト" : "シフト確認";
   if (isOffice) await showAdmin(profile, roleData);
   else {
     await loadOwnAvailability(profile.uid);
-    setConfirmedShifts(await loadOwnConfirmedShifts(profile.uid));
+    setConfirmedShifts(await loadOwnConfirmedShifts(profile.uid, profile.branchId));
     showScreen("calendar");
     showCalendar(profile);
   }
@@ -213,19 +225,25 @@ async function signOutUser() {
   closeMenu(); stopRoleObserver?.(); stopRoleObserver = null;
   await logout(); el.loginPassword.value = ""; showToast("ログアウトしました。");
 }
-function openMenu() { if (["staff","admin"].includes(roleData?.role)) el.sideMenuBackdrop.classList.add("show"); }
+function openMenu() { if (roleData?.accountStatus === "active") el.sideMenuBackdrop.classList.add("show"); }
 function closeMenu() { el.sideMenuBackdrop.classList.remove("show"); }
 function showScreen(name) {
   const screens = {login:el.loginScreen, register:el.registerScreen, calendar:el.calendarScreen,
     admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen,
     guardManagement:el.guardManagementScreen, deletedAccounts:el.deletedAccountsScreen,
-    proxyWorkers:el.proxyWorkerScreen};
+    proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen};
   Object.values(screens).forEach(screen => screen?.classList.remove("active"));
   screens[name]?.classList.add("active"); window.scrollTo({top:0, behavior:"smooth"});
 }
 async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   if (!["staff", "admin"].includes(roleData?.role) || worker?.inputMode !== "managed") return;
-  await loadOwnAvailability(worker.id || worker.uid);
+  try {
+    await loadOwnAvailability(worker.id || worker.uid, worker.branchId || roleData.branchId);
+  } catch (error) {
+    console.error(error);
+    showToast("代理入力画面を開けませんでした。Firestore Rulesのデプロイ状態を確認してください。");
+    return;
+  }
   setConfirmedShifts([]);
   showScreen("calendar");
   showCalendar({ ...worker, uid: worker.id || worker.uid }, {

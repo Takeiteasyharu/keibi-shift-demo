@@ -11,8 +11,10 @@ import {
 
 let availabilityByDate = new Map();
 
-export async function loadOwnAvailability(uid) {
-  const ownQuery = query(collection(db, "availability"), where("uid", "==", uid));
+export async function loadOwnAvailability(uid, branchId = "") {
+  const ownQuery = branchId
+    ? query(collection(db, "availability"), where("uid", "==", uid), where("branchId", "==", branchId))
+    : query(collection(db, "availability"), where("uid", "==", uid));
   const snapshot = await getDocs(ownQuery);
   availabilityByDate = new Map(snapshot.docs.map(item => [item.data().date, item.data()]));
   return availabilityByDate;

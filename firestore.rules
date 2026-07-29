@@ -276,6 +276,7 @@ service cloud.firestore {
     match /shiftGroups/{id} {
       allow read: if isActive() && ((isOffice() && resource.data.branchId == myRole().branchId)
         || (resource.data.status == 'confirmed'
+          && resource.data.branchId == myRole().branchId
           && (request.auth.uid in resource.data.memberUids
             || resource.data.leaderUid == request.auth.uid)));
       allow create: if isOffice() && isValidShiftGroup(request.resource.data)

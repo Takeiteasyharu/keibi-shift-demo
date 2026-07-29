@@ -17,11 +17,11 @@ let confirmationResolve = null;
 let notifyUser = () => {};
 const recentlyDuplicatedIds = new Set();
 
-export async function loadOwnConfirmedShifts(uid) {
+export async function loadOwnConfirmedShifts(uid, branchId) {
   const base = collection(db, "shiftGroups");
   const [memberSnapshot, legacyLeaderSnapshot] = await Promise.all([
-    getDocs(query(base, where("status", "==", "confirmed"), where("memberUids", "array-contains", uid))),
-    getDocs(query(base, where("status", "==", "confirmed"), where("leaderUid", "==", uid)))
+    getDocs(query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("memberUids", "array-contains", uid))),
+    getDocs(query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("leaderUid", "==", uid)))
   ]);
   return [...new Map(
     [...memberSnapshot.docs, ...legacyLeaderSnapshot.docs].map(item => [item.id, { id: item.id, ...item.data() }])
