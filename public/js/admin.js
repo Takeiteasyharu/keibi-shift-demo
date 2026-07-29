@@ -6,10 +6,12 @@ let navigate;
 let currentProfile;
 let currentRole;
 let activeFilter = "all";
+let openProxyCalendar;
 
-export function initAdmin(elements, showScreen) {
+export function initAdmin(elements, showScreen, proxyCalendar) {
   el = elements;
   navigate = showScreen;
+  openProxyCalendar = proxyCalendar;
   const today = toLocalDateKey(new Date());
   el.adminDate.value = today;
   el.adminSearchButton.addEventListener("click", renderAdmin);
@@ -91,13 +93,15 @@ async function renderAdmin() {
     const shift = user.shift || {};
     const status = shift.unavailable ? "勤務不可" : shift.undecided ? "未定" :
       shift.day && shift.night ? "日勤・夜勤" : shift.day ? "日勤" : shift.night ? "夜勤" : "未入力";
+    const updateType = shift.updatedByType === "staff" ? "代理入力" : shift.updatedByType === "self" ? "本人入力" : "記録なし";
     const values = [user.employeeNumber, null, shift.day ? "○" : "―", shift.night ? "○" : "―",
       status, shift.note || "", user.postalCode, `${user.prefecture}${user.city}${user.addressLine}${user.building || ""}`,
-      user.nearestStation || "", user.contactEmail];
+      user.nearestStation || "", user.contactEmail, updateType, null];
     const tr = document.createElement("tr");
     values.forEach((value, index) => {
       const td = document.createElement("td");
       if (index === 1) appendRoleName(td, user);
+      else if (index === values.length - 1 && user.inputMode === "managed") td.appendChild(proxyButton(user));
       else td.textContent = value;
       tr.appendChild(td);
     });
@@ -109,12 +113,21 @@ async function renderAdmin() {
     appendRoleName(heading, user);
     const details = document.createElement("div");
     details.className = "admin-card-details";
-    details.textContent = `${user.employeeNumber}\n${status}\n${shift.note || "備考なし"}\n` +
+    details.textContent = `${user.employeeNumber}\n${status}\n${updateType}\n${shift.note || "備考なし"}\n` +
       `${user.prefecture}${user.city}${user.addressLine}${user.building || ""}\n最寄り駅：${user.nearestStation || "―"}\n${user.contactEmail}`;
     card.append(heading, details);
+    if (user.inputMode === "managed") card.appendChild(proxyButton(user));
     el.adminCards.appendChild(card);
   });
-  if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="10">該当する利用者はいません</td></tr>';
+  if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="12">該当する利用者はいません</td></tr>';
+}
+
+function proxyButton(user) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "代理入力";
+  button.addEventListener("click", () => openProxyCalendar(user, "admin"));
+  return button;
 }
 
 function appendRoleName(container, user) {

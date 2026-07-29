@@ -2,7 +2,9 @@ import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, obse
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260727-1";
 import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260727-4";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260727-6";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260729-5";
+import { initGuardManagement, showGuardManagement } from "./guard-management.js?v=20260729-2";
+import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260729-1";
 
 const el = {};
 let toastTimer;
@@ -14,28 +16,38 @@ let showShiftBuilder;
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
-  initAdmin(el, showScreen);
+  initAdmin(el, showScreen, openProxyCalendar);
   initCalendar(el, showToast);
   showShiftBuilder = initShifts(el, showScreen, showToast);
+  initGuardManagement(el, showScreen, showToast, openProxyCalendar);
+  initProxyInput(el, showScreen, openProxyCalendar);
   bindEvents();
   observeAuthState(handleAuthState);
 });
 
 function cacheElements() {
-  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen",
+  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
    "showRegisterButton","forgotPasswordButton","regGuardId","regName","regEmail","regZip",
    "regPref","regCity","regStreet","regBuilding","regNearestStation","regPassword",
    "regPasswordConfirm","regStaffRequested","staffRequestFields","regStaffName","regStaffBranch",
-   "registerButton","backLoginButton","currentUserName","currentUserId","logoutButton",
+   "registerButton","backLoginButton","currentUserName","currentUserId","logoutButton","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
    "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
    "adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
-   "menuButton","requestsMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
-   "menuAdminButton","menuCalendarButton","menuRequestsButton","menuLogoutButton",
+   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
+   "menuAdminButton","menuCalendarButton","menuRequestsButton","menuGuardManagementButton","menuProxyInputButton","menuLogoutButton",
+   "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
+   "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
+   "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName",
+   "managedGuardPostalCode","managedGuardPrefecture","managedGuardCity","managedGuardAddressLine","managedGuardBuilding",
+   "managedGuardNearestStation","managedGuardContactEmail","saveManagedGuardButton","cancelManagedGuardButton",
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
+   "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
    "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton",
-   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","confirmShiftTopButton","closeShiftGroupTopButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
+   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
+   "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
+   "shiftOperationConfirmModal","shiftOperationConfirmTitle","shiftOperationConfirmMessage","confirmShiftOperationButton","cancelShiftOperationButton",
    "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails",
    "choiceDay","choiceNight","choiceUnavailable","choiceUndecided","shiftNote","saveShiftButton",
    "closeShiftButton","toast"].forEach(id => { el[id] = document.getElementById(id); });
@@ -55,11 +67,20 @@ function bindEvents() {
   el.registerButton.addEventListener("click", register);
   el.logoutButton.addEventListener("click", signOutUser);
   el.openAdminButton.addEventListener("click", openMenu);
-  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton].forEach(button => button.addEventListener("click", openMenu));
+  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton]
+    .forEach(button => button.addEventListener("click", openMenu));
   el.closeMenuButton.addEventListener("click", closeMenu);
   el.sideMenuBackdrop.addEventListener("click", event => { if (event.target === el.sideMenuBackdrop) closeMenu(); });
   el.menuAdminButton.addEventListener("click", async () => { closeMenu(); await showAdmin(profile, roleData); });
   el.menuShiftBuilderButton.addEventListener("click", async () => { closeMenu(); await showShiftBuilder(profile, roleData); });
+  el.menuGuardManagementButton.addEventListener("click", async () => {
+    closeMenu();
+    await showGuardManagement(profile, roleData);
+  });
+  el.menuProxyInputButton.addEventListener("click", async () => {
+    closeMenu();
+    await showProxyWorkerList(profile, roleData);
+  });
   el.menuCalendarButton.addEventListener("click", async () => {
     closeMenu(); await loadOwnAvailability(profile.uid); showScreen("calendar"); showCalendar(profile);
   });
@@ -92,6 +113,8 @@ async function handleRoleChange(nextRole) {
   roleData = nextRole;
   const isOffice = ["staff", "admin"].includes(roleData.role);
   el.openAdminButton.hidden = !isOffice;
+  el.menuGuardManagementButton.hidden = !isOffice;
+  el.menuProxyInputButton.hidden = !isOffice;
   if (isOffice) await showAdmin(profile, roleData);
   else {
     await loadOwnAvailability(profile.uid);
@@ -194,9 +217,26 @@ function openMenu() { if (["staff","admin"].includes(roleData?.role)) el.sideMen
 function closeMenu() { el.sideMenuBackdrop.classList.remove("show"); }
 function showScreen(name) {
   const screens = {login:el.loginScreen, register:el.registerScreen, calendar:el.calendarScreen,
-    admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen};
+    admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen,
+    guardManagement:el.guardManagementScreen, deletedAccounts:el.deletedAccountsScreen,
+    proxyWorkers:el.proxyWorkerScreen};
   Object.values(screens).forEach(screen => screen?.classList.remove("active"));
   screens[name]?.classList.add("active"); window.scrollTo({top:0, behavior:"smooth"});
+}
+async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
+  if (!["staff", "admin"].includes(roleData?.role) || worker?.inputMode !== "managed") return;
+  await loadOwnAvailability(worker.id || worker.uid);
+  setConfirmedShifts([]);
+  showScreen("calendar");
+  showCalendar({ ...worker, uid: worker.id || worker.uid }, {
+    proxy: true,
+    operatorUid: profile.uid,
+    returnAction: async () => {
+      if (returnScreen === "guardManagement") await showGuardManagement(profile, roleData);
+      else if (returnScreen === "admin") await showAdmin(profile, roleData);
+      else await showProxyWorkerList(profile, roleData);
+    }
+  });
 }
 async function runButtonTask(button, task) { button.disabled=true; try { await task(); } finally { button.disabled=false; } }
 function showMessage(target, text, error) { target.textContent=text; target.className=`message show ${error?"error":"success"}`; }

@@ -13,7 +13,10 @@ const state = {
   viewDate: new Date(),
   selectedDate: "",
   draft: emptyAvailability(),
-  profile: null
+  profile: null,
+  proxy: false,
+  operatorUid: "",
+  returnAction: null
 };
 let el;
 let notify;
@@ -38,16 +41,25 @@ export function initCalendar(elements, showToast) {
   el.choiceUnavailable.addEventListener("click", () => toggleDraft("unavailable"));
   el.choiceUndecided.addEventListener("click", () => toggleDraft("undecided"));
   el.saveShiftButton.addEventListener("click", save);
+  el.exitProxyInputButton.addEventListener("click", () => state.returnAction?.());
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && el.shiftModalBackdrop.classList.contains("show")) closeModal();
   });
 }
 
-export function showCalendar(profile) {
+export function showCalendar(profile, options = {}) {
   state.profile = profile;
+  state.proxy = Boolean(options.proxy);
+  state.operatorUid = options.operatorUid || profile.uid;
+  state.returnAction = options.returnAction || null;
   state.viewDate = new Date();
   el.currentUserName.textContent = profile.name;
   el.currentUserId.textContent = profile.employeeNumber;
+  el.proxyInputBanner.hidden = !state.proxy;
+  if (state.proxy) {
+    el.proxyInputTitle.textContent = `${profile.name}さんの勤務希望を代理入力中`;
+    el.proxyInputEmployeeNumber.textContent = `警備員番号：${profile.employeeNumber}`;
+  }
   renderCalendar();
 }
 
@@ -99,7 +111,7 @@ export function renderCalendar() {
     button.appendChild(chip);
 
     const lock = getLockState(dateKey);
-    if (lock.dayLocked || lock.nightLocked || isPastDate(dateKey)) {
+    if (!state.proxy && (lock.dayLocked || lock.nightLocked || isPastDate(dateKey))) {
       const locked = document.createElement("span");
       locked.className = "deadline-mini";
       locked.textContent = lockMessageShort(lock);
@@ -120,10 +132,13 @@ function openModal(dateKey) {
   el.shiftNote.value = state.draft.note;
   const lock = getLockState(dateKey);
   const past = isPastDate(dateKey);
-  el.modalLockNote.hidden = !(past || lock.dayLocked || lock.nightLocked);
-  el.modalLockNote.textContent = past ? "過去の日付は変更できません。" : lockMessageFull(lock);
-  el.shiftNote.disabled = past || (lock.dayLocked && lock.nightLocked);
-  el.saveShiftButton.disabled = past || (lock.dayLocked && lock.nightLocked);
+  const afterDeadline = past || lock.dayLocked || lock.nightLocked;
+  el.modalLockNote.hidden = state.proxy ? !afterDeadline : !afterDeadline;
+  el.modalLockNote.textContent = state.proxy && afterDeadline
+    ? "締切後の変更です。保存前に確認します。"
+    : past ? "過去の日付は変更できません。" : lockMessageFull(lock);
+  el.shiftNote.disabled = !state.proxy && (past || (lock.dayLocked && lock.nightLocked));
+  el.saveShiftButton.disabled = !state.proxy && (past || (lock.dayLocked && lock.nightLocked));
   updateChoiceButtons();
   el.shiftModalBackdrop.classList.add("show");
 }
@@ -134,9 +149,9 @@ function closeModal() {
 
 function toggleDraft(kind) {
   const lock = getLockState(state.selectedDate);
-  if (isPastDate(state.selectedDate)) return;
-  if ((kind === "day" && lock.dayLocked) || (kind === "night" && lock.nightLocked)) return;
-  if ((kind === "unavailable" || kind === "undecided") && (lock.dayLocked || lock.nightLocked)) return;
+  if (!state.proxy && isPastDate(state.selectedDate)) return;
+  if (!state.proxy && ((kind === "day" && lock.dayLocked) || (kind === "night" && lock.nightLocked))) return;
+  if (!state.proxy && (kind === "unavailable" || kind === "undecided") && (lock.dayLocked || lock.nightLocked)) return;
 
   if (kind === "unavailable" || kind === "undecided") {
     const nextValue = !state.draft[kind];
@@ -154,33 +169,39 @@ function updateChoiceButtons() {
   const lock = getLockState(state.selectedDate);
   const past = isPastDate(state.selectedDate);
   const pairs = [
-    [el.choiceDay, "day", past || lock.dayLocked],
-    [el.choiceNight, "night", past || lock.nightLocked],
-    [el.choiceUnavailable, "unavailable", past || lock.dayLocked || lock.nightLocked],
-    [el.choiceUndecided, "undecided", past || lock.dayLocked || lock.nightLocked]
+    [el.choiceDay, "day", !state.proxy && (past || lock.dayLocked)],
+    [el.choiceNight, "night", !state.proxy && (past || lock.nightLocked)],
+    [el.choiceUnavailable, "unavailable", !state.proxy && (past || lock.dayLocked || lock.nightLocked)],
+    [el.choiceUndecided, "undecided", !state.proxy && (past || lock.dayLocked || lock.nightLocked)]
   ];
   pairs.forEach(([button, key, disabled]) => {
     button.classList.toggle("selected", state.draft[key]);
     button.setAttribute("aria-pressed", String(state.draft[key]));
     button.disabled = disabled;
   });
-  el.choiceDay.textContent = lock.dayLocked ? "日勤 締切済み" : "日勤を希望する";
-  el.choiceNight.textContent = lock.nightLocked ? "夜勤 締切済み" : "夜勤を希望する";
+  el.choiceDay.textContent = !state.proxy && lock.dayLocked ? "日勤 締切済み" : "日勤を希望する";
+  el.choiceNight.textContent = !state.proxy && lock.nightLocked ? "夜勤 締切済み" : "夜勤を希望する";
 }
 
 async function save() {
   const lock = getLockState(state.selectedDate);
-  if (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked)) return;
+  const afterDeadline = isPastDate(state.selectedDate) || lock.dayLocked || lock.nightLocked;
+  if (!state.proxy && (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked))) return;
+  if (state.proxy && afterDeadline && !window.confirm("締切後ですが、この内容で変更しますか？")) return;
   const existing = normalizeAvailability(getAvailability(state.selectedDate));
   const next = normalizeAvailability({ ...state.draft, note: el.shiftNote.value });
-  if (lock.dayLocked) next.day = existing.day;
-  if (lock.nightLocked) next.night = existing.night;
+  if (!state.proxy && lock.dayLocked) next.day = existing.day;
+  if (!state.proxy && lock.nightLocked) next.night = existing.night;
   el.saveShiftButton.disabled = true;
   try {
-    await saveAvailability(state.profile.uid, state.selectedDate, next, state.profile.branchId);
+    await saveAvailability(state.profile.uid, state.selectedDate, next, state.profile.branchId, {
+      updatedByUid: state.operatorUid,
+      updatedByType: state.proxy ? "staff" : "self",
+      updatedAfterDeadline: state.proxy && afterDeadline
+    });
     closeModal();
     renderCalendar();
-    notify("勤務希望を保存しました。");
+    notify(state.proxy ? `${state.profile.name}さんの勤務希望を代理入力しました。` : "勤務希望を保存しました。");
   } catch (error) {
     console.error(error);
     notify("保存できませんでした。通信状態を確認してください。");

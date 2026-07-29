@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260727-5">
+  <link rel="stylesheet" href="./css/style.css?v=20260729-7">
 </head>
 <body>
   <main class="app">
@@ -101,6 +101,11 @@
     </section>
 
     <section id="calendarScreen" class="screen" aria-labelledby="calendarTitle">
+      <div id="proxyInputBanner" class="proxy-input-banner" hidden>
+        <strong id="proxyInputTitle"></strong>
+        <span id="proxyInputEmployeeNumber"></span>
+        <button id="exitProxyInputButton" class="secondary" type="button">代理入力を終了して戻る</button>
+      </div>
       <div class="header">
         <div>
           <h1 id="calendarTitle">勤務希望</h1>
@@ -199,6 +204,8 @@
               <th>住所</th>
               <th>最寄り駅</th>
               <th>連絡用メール</th>
+              <th>最終更新</th>
+              <th>代理入力</th>
             </tr>
           </thead>
           <tbody id="adminTableBody"></tbody>
@@ -207,12 +214,90 @@
       <div id="adminCards" class="admin-cards"></div>
     </section>
 
+    <section id="proxyWorkerScreen" class="screen" aria-labelledby="proxyWorkerTitle">
+      <div class="header">
+        <div>
+          <h1 id="proxyWorkerTitle">代理入力する警備員を選択</h1>
+          <div class="user-line">Webを利用しない警備員の勤務希望を入力します</div>
+        </div>
+        <button id="proxyWorkerMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="proxyWorkerMessage" class="message" role="alert"></div>
+      <div class="panel guard-management-tools">
+        <label for="proxyWorkerSearch">氏名・警備員番号で検索</label>
+        <input id="proxyWorkerSearch" type="search" placeholder="例：山田 太郎、012345">
+      </div>
+      <div class="desktop-table guard-management-table">
+        <table>
+          <thead><tr><th>警備員番号</th><th>氏名</th><th>最寄り駅</th><th>操作</th></tr></thead>
+          <tbody id="proxyWorkerTableBody"></tbody>
+        </table>
+      </div>
+      <div id="proxyWorkerCards" class="guard-management-cards"></div>
+    </section>
+
     <section id="staffRequestsScreen" class="screen" aria-labelledby="staffRequestsTitle">
       <div class="header"><h1 id="staffRequestsTitle">内勤者申請</h1>
         <button id="requestsMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
       </div>
       <div id="staffRequestsMessage" class="message" role="alert"></div>
       <div id="staffRequestsList" class="request-list"></div>
+    </section>
+
+    <section id="guardManagementScreen" class="screen" aria-labelledby="guardManagementTitle">
+      <div class="header">
+        <div>
+          <h1 id="guardManagementTitle">警備員管理</h1>
+          <div class="user-line">同じ支社の警備員・内勤者・管理者を管理します</div>
+        </div>
+        <button id="guardManagementMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="guardManagementMessage" class="message" role="alert"></div>
+      <div class="panel guard-management-tools">
+        <button id="newManagedGuardButton" class="wide-action" type="button">＋ 新しい警備員を登録</button>
+        <button id="openDeletedAccountsButton" class="secondary" type="button">削除済みアカウント</button>
+        <p class="small-text">ここでは、Webを利用せず内勤者が勤務希望を代理入力する警備員を登録します。</p>
+        <label for="guardManagementSearch">氏名・警備員番号で検索</label>
+        <input id="guardManagementSearch" type="search" placeholder="例：山田 太郎、012345">
+      </div>
+      <div class="desktop-table guard-management-table">
+        <table>
+          <thead>
+            <tr>
+              <th>警備員番号</th><th>氏名</th><th>区分</th><th>最寄り駅</th>
+              <th>連絡用メール</th><th>利用方法</th><th>アカウント状態</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="guardManagementTableBody"></tbody>
+        </table>
+      </div>
+      <div id="guardManagementCards" class="guard-management-cards"></div>
+    </section>
+
+    <section id="deletedAccountsScreen" class="screen" aria-labelledby="deletedAccountsTitle">
+      <div class="header">
+        <div>
+          <h1 id="deletedAccountsTitle">削除済みアカウント</h1>
+          <div class="user-line">利用停止中のアカウントです。過去の勤務希望やシフト履歴は保持されています。</div>
+        </div>
+        <button id="deletedAccountsMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="deletedAccountsMessage" class="message" role="alert"></div>
+      <div class="panel guard-management-tools">
+        <button id="backToGuardManagementButton" class="secondary" type="button">警備員一覧へ戻る</button>
+      </div>
+      <div class="desktop-table guard-management-table">
+        <table>
+          <thead>
+            <tr>
+              <th>警備員番号</th><th>氏名</th><th>区分</th><th>最寄り駅</th>
+              <th>利用方法</th><th>利用停止日時</th><th>利用停止した担当者</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="deletedAccountsTableBody"></tbody>
+        </table>
+      </div>
+      <div id="deletedAccountsCards" class="guard-management-cards"></div>
     </section>
 
     <section id="shiftBuilderScreen" class="screen" aria-labelledby="shiftBuilderTitle">
@@ -259,6 +344,8 @@
       <button id="closeMenuButton" class="secondary" type="button">閉じる</button>
       <button id="menuAdminButton" type="button">管理画面</button>
       <button id="menuShiftBuilderButton" type="button">シフト作成</button>
+      <button id="menuGuardManagementButton" type="button">警備員管理</button>
+      <button id="menuProxyInputButton" type="button">勤務希望の代理入力</button>
       <button id="menuCalendarButton" type="button">自分の勤務希望</button>
       <button id="menuRequestsButton" type="button">内勤者申請</button>
       <button id="menuLogoutButton" class="secondary" type="button">ログアウト</button>
@@ -270,8 +357,9 @@
       <div class="shift-editor-header">
         <h2 id="shiftGroupModalTitle">新しいグループ</h2>
         <div class="shift-editor-top-actions">
+          <button id="draftShiftTopButton" class="secondary" type="button">下書きを保存</button>
           <button id="confirmShiftTopButton" type="button">シフトを確定する</button>
-          <button id="closeShiftGroupTopButton" class="secondary" type="button">変更せず閉じる</button>
+          <button id="closeShiftGroupTopButton" class="neutral" type="button">変更せず戻る</button>
         </div>
       </div>
       <div class="member-section-heading">
@@ -313,7 +401,67 @@
       <div id="leaderChoices" class="leader-choices"></div>
       <button id="clearLeaderButton" class="secondary" type="button">隊長選択を解除</button>
       <div id="groupCompletionMessage" class="completion-warning" role="status"></div>
-      <div class="actions"><button id="confirmShiftButton" type="button">シフトを確定する</button><button id="closeShiftGroupButton" class="secondary" type="button">変更せず閉じる</button></div>
+      <div class="actions">
+        <button id="draftShiftButton" class="secondary" type="button">下書きを保存</button>
+        <button id="confirmShiftButton" type="button">シフトを確定する</button>
+        <button id="closeShiftGroupButton" class="neutral" type="button">変更せず戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="managedGuardModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="managedGuardModalTitle">
+    <div class="modal guard-editor">
+      <h2 id="managedGuardModalTitle">新しい警備員を登録</h2>
+      <p class="large-help">Webを利用しない警備員を、代理入力対象者として登録します。</p>
+      <div id="managedGuardFormMessage" class="message" role="alert"></div>
+      <div class="form-grid">
+        <label>警備員番号（6桁・変更不可）
+          <input id="managedGuardEmployeeNumber" type="text" inputmode="numeric" maxlength="6">
+        </label>
+        <label>氏名
+          <input id="managedGuardName" type="text" maxlength="80">
+        </label>
+        <label>郵便番号（7桁）
+          <input id="managedGuardPostalCode" type="text" inputmode="numeric" maxlength="8">
+        </label>
+        <label>都道府県
+          <input id="managedGuardPrefecture" type="text" maxlength="20">
+        </label>
+        <label>市区町村
+          <input id="managedGuardCity" type="text" maxlength="80">
+        </label>
+        <label>町名・番地
+          <input id="managedGuardAddressLine" type="text" maxlength="160">
+        </label>
+        <label>建物名・部屋番号（任意）
+          <input id="managedGuardBuilding" type="text" maxlength="160">
+        </label>
+        <label>最寄り駅
+          <input id="managedGuardNearestStation" type="text" maxlength="80">
+        </label>
+        <label class="full">連絡用メールアドレス（任意）
+          <input id="managedGuardContactEmail" type="email" maxlength="254">
+        </label>
+      </div>
+      <div class="managed-fixed-values">
+        <strong>固定設定</strong>
+        <span>利用方法：代理入力</span><span>区分：警備員</span><span>状態：active</span>
+      </div>
+      <div class="actions">
+        <button id="saveManagedGuardButton" type="button">保存する</button>
+        <button id="cancelManagedGuardButton" class="secondary" type="button">変更せず閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="accountStatusConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="accountStatusConfirmTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="accountStatusConfirmTitle">利用停止の確認</h2>
+      <div id="accountStatusConfirmMessage" class="operation-confirm-message"></div>
+      <div class="actions">
+        <button id="confirmAccountStatusButton" class="danger" type="button">利用停止にする</button>
+        <button id="cancelAccountStatusButton" class="secondary" type="button">キャンセル</button>
+      </div>
     </div>
   </div>
 
@@ -325,6 +473,32 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260727-6"></script>
+  <div id="shiftDateActionModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shiftDateActionTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="shiftDateActionTitle">日付を選択</h2>
+      <p id="shiftDateActionHelp" class="large-help"></p>
+      <label>日付
+        <input id="shiftDateActionInput" type="date">
+      </label>
+      <div id="shiftDateActionError" class="message" role="alert"></div>
+      <div class="actions">
+        <button id="saveShiftDateActionButton" type="button">保存する</button>
+        <button id="cancelShiftDateActionButton" class="secondary" type="button">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="shiftOperationConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shiftOperationConfirmTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="shiftOperationConfirmTitle">操作の確認</h2>
+      <div id="shiftOperationConfirmMessage" class="operation-confirm-message"></div>
+      <div class="actions">
+        <button id="confirmShiftOperationButton" type="button">変更する</button>
+        <button id="cancelShiftOperationButton" class="secondary" type="button">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js?v=20260729-7"></script>
 </body>
 </html>

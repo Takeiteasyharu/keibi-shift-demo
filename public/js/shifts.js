@@ -11,6 +11,11 @@ let selectedLeader = null;
 let selectedMembers = new Set();
 let profileNames = new Map();
 let candidatesExpanded = false;
+let openCardMenu = null;
+let pendingDateAction = null;
+let confirmationResolve = null;
+let notifyUser = () => {};
+const recentlyDuplicatedIds = new Set();
 
 export async function loadOwnConfirmedShifts(uid) {
   const base = collection(db, "shiftGroups");
@@ -25,6 +30,7 @@ export async function loadOwnConfirmedShifts(uid) {
 
 export function initShifts(elements, showScreen, notify) {
   el = elements;
+  notifyUser = notify;
   for (let hour = 0; hour < 24; hour += 1) {
     const option = document.createElement("option");
     option.value = String(hour).padStart(2, "0");
@@ -53,6 +59,8 @@ export function initShifts(elements, showScreen, notify) {
   el.newShiftGroupButton.addEventListener("click", () => openEditor());
   el.closeShiftGroupButton.addEventListener("click", closeEditor);
   el.closeShiftGroupTopButton.addEventListener("click", closeEditor);
+  el.draftShiftButton.addEventListener("click", () => saveGroup("draft", notify));
+  el.draftShiftTopButton.addEventListener("click", () => saveGroup("draft", notify));
   el.confirmShiftButton.addEventListener("click", () => saveGroup("confirmed", notify));
   el.confirmShiftTopButton.addEventListener("click", () => saveGroup("confirmed", notify));
   el.requiredMembersPickerButton.addEventListener("click", () => {
@@ -77,6 +85,25 @@ export function initShifts(elements, showScreen, notify) {
   el.showOutsideAvailability.addEventListener("change", () => {
     setCandidatesExpanded(el.showOutsideAvailability.checked);
     renderCandidates();
+  });
+  el.cancelShiftDateActionButton.addEventListener("click", closeDateActionModal);
+  el.saveShiftDateActionButton.addEventListener("click", () => runCardOperation(saveDateAction));
+  el.shiftDateActionModal.addEventListener("click", event => {
+    if (event.target === el.shiftDateActionModal) closeDateActionModal();
+  });
+  el.confirmShiftOperationButton.addEventListener("click", () => finishConfirmation(true));
+  el.cancelShiftOperationButton.addEventListener("click", () => finishConfirmation(false));
+  el.shiftOperationConfirmModal.addEventListener("click", event => {
+    if (event.target === el.shiftOperationConfirmModal) finishConfirmation(false);
+  });
+  document.addEventListener("click", event => {
+    if (openCardMenu && !openCardMenu.contains(event.target)) closeCardMenu();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    if (el.shiftOperationConfirmModal.classList.contains("show")) finishConfirmation(false);
+    else if (el.shiftDateActionModal.classList.contains("show")) closeDateActionModal();
+    else closeCardMenu();
   });
   el.clearLeaderButton.addEventListener("click", () => {
     selectedLeader = null;
@@ -107,6 +134,7 @@ function setType(value) {
 
 async function renderGroups() {
   if (!currentRole) return;
+  closeCardMenu();
   const groupQuery = query(
     collection(db, "shiftGroups"),
     where("branchId", "==", currentRole.branchId),
@@ -124,37 +152,287 @@ async function renderGroups() {
   groups.forEach(group => {
     const issues = incompleteIssues(group);
     const card = document.createElement("article");
-    card.className = `shift-group-card ${issues.length ? "incomplete" : "complete"}`;
+    const isConfirmed = group.status === "confirmed";
+    card.className = `shift-group-card ${issues.length ? "incomplete" : "complete"} ${isConfirmed ? "status-confirmed-card" : "status-draft-card"}`;
     const visibleIssues = issues.slice(0, 3);
     const remaining = issues.length - visibleIssues.length;
     card.innerHTML = `
       <div class="group-card-heading">
-        <h2>${safe(group.title || "名称未入力のグループ")}</h2>
-        <span class="completion-badge ${issues.length ? "is-incomplete" : "is-complete"}">${issues.length ? "未完成" : "入力完了"}</span>
+        <div class="group-card-controls">
+          <span class="shift-status-badge ${isConfirmed ? "is-confirmed" : "is-draft"}">${isConfirmed ? "確定済み" : "下書き"}</span>
+          <span class="completion-badge ${issues.length ? "is-incomplete" : "is-complete"}">${issues.length ? "未完成" : "入力完了"}</span>
+        </div>
       </div>
+      <h2 class="group-card-title">${safe(group.title || "名称未入力のグループ")}</h2>
       <div>${safe(group.address || "現場住所未入力")}</div>
       <div>勤務開始：${safe(displayStartTime(group.startTime) || "開始時刻未入力")}</div>
       <div>隊長：${safe(group.leaderUid ? nameOf(group.leaderUid) : "未選択")}　配置人数：${group.memberUids.length}人</div>
       <div>備考：${safe(group.note || "なし")}</div>
       ${issues.length ? `<div class="incomplete-summary"><strong>未入力項目があります</strong><ul>${visibleIssues.map(issue => `<li>${safe(issue)}</li>`).join("")}</ul>${remaining > 0 ? `<div>ほか${remaining}件</div>` : ""}</div>` : ""}
     `;
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const edit = button("編集", () => openEditor(group));
-    const remove = button("削除", async () => {
-      if (confirm("このグループを削除しますか？")) {
-        await deleteDoc(doc(db, "shiftGroups", group.id));
-        await renderGroups();
-      }
-    });
-    remove.className = "danger";
-    actions.append(edit, remove);
-    card.appendChild(actions);
+    const cardControls = card.querySelector(".group-card-controls");
+    cardControls.appendChild(createCardMenu(group, card));
+    if (recentlyDuplicatedIds.has(group.id)) {
+      const notice = document.createElement("div");
+      notice.className = "duplicated-shift-notice";
+      notice.textContent = "複製しました。複製したシフトです。内容を確認してください。";
+      card.appendChild(notice);
+      recentlyDuplicatedIds.delete(group.id);
+    }
     el.shiftGroupsList.appendChild(card);
   });
   if (!groups.length) {
     el.shiftGroupsList.innerHTML = '<div class="panel">この日の作成済みグループはありません。</div>';
   }
+}
+
+function createCardMenu(group, card) {
+  const wrap = document.createElement("div");
+  wrap.className = "shift-card-menu-wrap";
+  const trigger = button("⋮", event => {
+    event.stopPropagation();
+    const isOpening = openCardMenu !== wrap;
+    closeCardMenu();
+    if (!isOpening) return;
+    openCardMenu = wrap;
+    card.classList.add("menu-open");
+    menu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+  });
+  trigger.className = "shift-card-menu-button secondary";
+  trigger.setAttribute("aria-label", `${group.title || "名称未入力のグループ"}の操作メニューを開く`);
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+
+  const menu = document.createElement("div");
+  menu.className = "shift-card-menu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  const targetType = group.shiftType === "day" ? "night" : "day";
+  menu.append(
+    menuButton("編集", () => openEditor(group)),
+    menuButton(`${targetType === "day" ? "日勤" : "夜勤"}に変更`, () => changeShiftType(group, targetType)),
+    menuButton("日付を変更", () => openDateActionModal("move", group)),
+    menuButton("複製", () => openDateActionModal("duplicate", group)),
+    menuButton("削除", () => deleteGroup(group), true)
+  );
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
+function menuButton(label, handler, destructive = false) {
+  const item = button(label, event => {
+    event.stopPropagation();
+    closeCardMenu();
+    runCardOperation(handler);
+  });
+  item.setAttribute("role", "menuitem");
+  if (destructive) item.className = "menu-delete";
+  return item;
+}
+
+function closeCardMenu() {
+  if (!openCardMenu) return;
+  openCardMenu.querySelector(".shift-card-menu").hidden = true;
+  openCardMenu.querySelector(".shift-card-menu-button").setAttribute("aria-expanded", "false");
+  openCardMenu.closest(".shift-group-card")?.classList.remove("menu-open");
+  openCardMenu = null;
+}
+
+async function runCardOperation(operation) {
+  try {
+    await operation();
+  } catch (error) {
+    console.error(error);
+    notifyUser("シフトを更新できませんでした。");
+  }
+}
+
+async function changeShiftType(group, targetType) {
+  const typeLabel = targetType === "day" ? "日勤" : "夜勤";
+  const duplicateWarning = await duplicateAssignmentWarning(group, group.date, targetType, group.id);
+  const confirmedWarning = confirmedOperationWarning(group);
+  const message = [
+    confirmedWarning,
+    `このシフトを${typeLabel}に変更しますか？`,
+    duplicateWarning
+  ].filter(Boolean).join("\n\n");
+  if (!await confirmOperation(message, "変更する")) return;
+  await updateDoc(doc(db, "shiftGroups", group.id), {
+    shiftType: targetType,
+    updatedAt: serverTimestamp()
+  });
+  notifyUser(`${typeLabel}に変更しました。`);
+  await renderGroups();
+}
+
+function openDateActionModal(mode, group) {
+  closeCardMenu();
+  pendingDateAction = { mode, group };
+  const duplicating = mode === "duplicate";
+  el.shiftDateActionTitle.textContent = duplicating ? "複製先の日付を選択" : "シフトの日付を変更";
+  el.shiftDateActionHelp.textContent = duplicating
+    ? "複製先の日付を選択してください。複製先は下書きになります。"
+    : "変更後の日付を選択してください。";
+  el.shiftDateActionInput.value = group.date;
+  el.shiftDateActionInput.min = localKey(new Date());
+  el.saveShiftDateActionButton.textContent = duplicating ? "この日付に複製" : "この日付に変更";
+  clearDateActionError();
+  el.shiftDateActionModal.classList.add("show");
+  requestAnimationFrame(() => el.shiftDateActionInput.focus());
+}
+
+function closeDateActionModal() {
+  pendingDateAction = null;
+  clearDateActionError();
+  el.shiftDateActionModal.classList.remove("show");
+}
+
+function clearDateActionError() {
+  el.shiftDateActionError.textContent = "";
+  el.shiftDateActionError.className = "message";
+}
+
+async function saveDateAction() {
+  if (!pendingDateAction) return;
+  const targetDate = el.shiftDateActionInput.value;
+  if (!targetDate) {
+    showDateActionError("日付を選択してください。");
+    return;
+  }
+  if (targetDate < localKey(new Date())) {
+    showDateActionError("過去の日付には変更・複製できません。");
+    return;
+  }
+  const action = pendingDateAction;
+  closeDateActionModal();
+  if (action.mode === "duplicate") await duplicateGroup(action.group, targetDate);
+  else await changeGroupDate(action.group, targetDate);
+}
+
+function showDateActionError(message) {
+  el.shiftDateActionError.textContent = message;
+  el.shiftDateActionError.className = "message show error";
+}
+
+async function changeGroupDate(group, targetDate) {
+  if (targetDate === group.date) {
+    notifyUser("日付は変更されていません。");
+    return;
+  }
+  const duplicateWarning = await duplicateAssignmentWarning(group, targetDate, group.shiftType, group.id);
+  const message = [
+    confirmedOperationWarning(group),
+    `このシフトの日付を${formatJapaneseDate(targetDate)}に変更しますか？`,
+    duplicateWarning
+  ].filter(Boolean).join("\n\n");
+  if (!await confirmOperation(message, "変更する")) return;
+  await updateDoc(doc(db, "shiftGroups", group.id), {
+    date: targetDate,
+    updatedAt: serverTimestamp()
+  });
+  notifyUser(`${formatJapaneseDate(targetDate)}に変更しました。`);
+  await renderGroups();
+}
+
+async function duplicateGroup(group, targetDate) {
+  const duplicateWarning = await duplicateAssignmentWarning(group, targetDate, group.shiftType);
+  const message = [
+    `このシフトを${formatJapaneseDate(targetDate)}に複製しますか？`,
+    "複製先は下書きになります。配置内容を必ず確認してください。",
+    duplicateWarning
+  ].filter(Boolean).join("\n\n");
+  if (!await confirmOperation(message, "この日付に複製")) return;
+  const copied = {
+    ...copyShiftContent(group),
+    date: targetDate,
+    status: "draft",
+    createdBy: currentProfile.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+  const created = await addDoc(collection(db, "shiftGroups"), copied);
+  recentlyDuplicatedIds.add(created.id);
+  el.shiftBuilderDate.value = targetDate;
+  setTypeClasses(group.shiftType);
+  notifyUser("シフトを複製しました。配置内容を確認してください。");
+  await renderGroups();
+}
+
+function copyShiftContent(group) {
+  const managementFields = new Set(["id", "status", "createdAt", "updatedAt", "createdBy"]);
+  const content = Object.fromEntries(
+    Object.entries(group).filter(([key]) => !managementFields.has(key))
+  );
+  content.memberUids = [...group.memberUids];
+  return content;
+}
+
+async function deleteGroup(group) {
+  const warning = group.status === "confirmed"
+    ? "確定済みシフトを変更します。\nこのシフトは確定済みです。\n削除すると警備員のシフト確認画面からも消えます。"
+    : "このシフトを削除しますか？";
+  const message = `${warning}\n\nこの操作は元に戻せません。`;
+  if (!await confirmOperation(message, "削除する", true)) return;
+  await deleteDoc(doc(db, "shiftGroups", group.id));
+  notifyUser("シフトを削除しました。");
+  await renderGroups();
+}
+
+function confirmOperation(message, confirmLabel, destructive = false) {
+  if (confirmationResolve) finishConfirmation(false);
+  el.shiftOperationConfirmMessage.textContent = message;
+  el.confirmShiftOperationButton.textContent = confirmLabel;
+  el.confirmShiftOperationButton.className = destructive ? "danger" : "";
+  el.shiftOperationConfirmModal.classList.add("show");
+  return new Promise(resolve => {
+    confirmationResolve = resolve;
+    requestAnimationFrame(() => el.confirmShiftOperationButton.focus());
+  });
+}
+
+function finishConfirmation(confirmed) {
+  if (!confirmationResolve) return;
+  const resolve = confirmationResolve;
+  confirmationResolve = null;
+  el.shiftOperationConfirmModal.classList.remove("show");
+  resolve(confirmed);
+}
+
+function confirmedOperationWarning(group) {
+  return group.status === "confirmed" ? "確定済みシフトを変更します。" : "";
+}
+
+async function duplicateAssignmentWarning(group, targetDate, targetType, excludedId = null) {
+  if (!group.memberUids.length) return "";
+  const snapshot = await getDocs(query(
+    collection(db, "shiftGroups"),
+    where("branchId", "==", currentRole.branchId),
+    where("date", "==", targetDate),
+    where("shiftType", "==", targetType)
+  ));
+  const duplicateUids = new Set();
+  snapshot.docs.forEach(item => {
+    if (item.id === excludedId) return;
+    const other = normalizeGroup(item.data());
+    other.memberUids.forEach(uid => {
+      if (group.memberUids.includes(uid)) duplicateUids.add(uid);
+    });
+  });
+  if (!duplicateUids.size) return "";
+  const typeLabel = targetType === "day" ? "日勤" : "夜勤";
+  const names = [...duplicateUids].map(uid => `${nameOf(uid)}さん`).join("、");
+  return `重複配置の可能性があります。\n${names}は、${formatJapaneseDate(targetDate)}の${typeLabel}ですでに別のシフトへ配置されています。\n続行する場合は配置内容を確認してください。`;
+}
+
+function formatJapaneseDate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return `${year}年${month}月${day}日`;
+}
+
+function setTypeClasses(value) {
+  el.shiftTypeDay.className = value === "day" ? "active" : "secondary";
+  el.shiftTypeNight.className = value === "night" ? "active" : "secondary";
 }
 
 async function openEditor(group = null) {

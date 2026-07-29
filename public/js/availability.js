@@ -22,7 +22,7 @@ export function getAvailability(date) {
   return availabilityByDate.get(date) || null;
 }
 
-export async function saveAvailability(uid, date, values, branchId = "kokubunji") {
+export async function saveAvailability(uid, date, values, branchId = "kokubunji", audit = {}) {
   const reference = doc(db, "availability", `${date}_${uid}`);
   const previous = availabilityByDate.get(date);
   const data = {
@@ -34,6 +34,9 @@ export async function saveAvailability(uid, date, values, branchId = "kokubunji"
     unavailable: Boolean(values.unavailable),
     undecided: Boolean(values.undecided),
     note: String(values.note || "").trim().slice(0, 500),
+    updatedByUid: audit.updatedByUid || uid,
+    updatedByType: audit.updatedByType === "staff" ? "staff" : "self",
+    updatedAfterDeadline: Boolean(audit.updatedAfterDeadline),
     createdAt: previous?.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()
   };

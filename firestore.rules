@@ -1,8 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // users/{uid}: profile PII + query-only branchId
-    // userRoles/{uid}: role, branchId, accountStatus, leaderEligible, timestamps
+    // users/{workerId}: profile PII. Web users use workerId == Auth UID;
+    // managed users use an auto ID, inputMode == managed, authUid == null.
+    // userRoles/{workerId}: role, branchId, accountStatus, leaderEligible, timestamps
     // employeeNumbers/{6 digits}: uid
     // availability/{date_uid}: owner availability with branchId
     // staffRequests/{uid}: one staff application per user
@@ -22,24 +23,77 @@ service cloud.firestore {
       return data.keys().hasAll(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
         'addressLine','building','nearestStation','branchId','createdAt','updatedAt'])
         && data.keys().hasOnly(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
-        'addressLine','building','nearestStation','branchId','createdAt','updatedAt'])
+        'addressLine','building','nearestStation','branchId','inputMode','authUid','createdBy','createdAt','updatedAt'])
         && data.employeeNumber is string && data.employeeNumber.matches('^[0-9]{6}$')
-        && validText(data.name,1,80) && validEmail(data.contactEmail)
+        && validText(data.name,1,80)
+        && (data.contactEmail == '' || validEmail(data.contactEmail))
         && data.postalCode is string && data.postalCode.matches('^[0-9]{7}$')
         && validText(data.prefecture,1,20) && validText(data.city,1,80)
         && validText(data.addressLine,1,160) && validText(data.building,0,160)
-        && validText(data.nearestStation,0,80) && data.branchId == 'kokubunji'
+        && validText(data.nearestStation,0,80) && validText(data.branchId,1,40)
+        && (!('inputMode' in data) || data.inputMode in ['web','managed'])
+        && (!('authUid' in data) || data.authUid == null || validText(data.authUid,1,128))
+        && (!('createdBy' in data) || validText(data.createdBy,1,128))
         && data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+    function isValidManagedUser(data) {
+      return isValidUser(data)
+        && data.keys().hasAll(['inputMode','authUid','createdBy'])
+        && data.inputMode == 'managed' && data.authUid == null
+        && validText(data.nearestStation,1,80)
+        && validText(data.createdBy,1,128);
     }
     function isValidRole(data) {
       return data.keys().hasAll(['role','branchId','accountStatus','leaderEligible','createdAt','updatedAt'])
-        && data.keys().hasOnly(['role','branchId','accountStatus','leaderEligible','createdAt','updatedAt'])
+        && data.keys().hasOnly(['role','branchId','accountStatus','leaderEligible','createdAt','updatedAt',
+          'disabledAt','disabledByUid'])
         && data.role in ['guard','staff','admin'] && validText(data.branchId,1,40)
-        && data.accountStatus in ['active','suspended','disabled']
-        && data.leaderEligible is bool && data.createdAt is timestamp && data.updatedAt is timestamp;
+        && data.accountStatus in ['active','inactive','suspended','disabled']
+        && data.leaderEligible is bool && data.createdAt is timestamp && data.updatedAt is timestamp
+        && (
+          (data.accountStatus == 'inactive'
+            && data.keys().hasAll(['disabledAt','disabledByUid'])
+            && data.disabledAt is timestamp && validText(data.disabledByUid,1,128))
+          || (data.accountStatus != 'inactive'
+            && !('disabledAt' in data) && !('disabledByUid' in data))
+        );
+    }
+    function isValidDeactivation(uid) {
+      return isOffice() && uid != request.auth.uid
+        && resource.data.branchId == myRole().branchId
+        && resource.data.accountStatus == 'active'
+        && resource.data.role in ['guard','staff']
+        && request.resource.data.accountStatus == 'inactive'
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.branchId == resource.data.branchId
+        && request.resource.data.disabledAt == request.time
+        && request.resource.data.disabledByUid == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['accountStatus','disabledAt','disabledByUid','updatedAt']);
+    }
+    function isValidRestoration(uid) {
+      return isAdmin() && uid != request.auth.uid
+        && resource.data.branchId == myRole().branchId
+        && resource.data.accountStatus == 'inactive'
+        && resource.data.role in ['guard','staff']
+        && request.resource.data.accountStatus == 'active'
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.branchId == resource.data.branchId
+        && !('disabledAt' in request.resource.data)
+        && !('disabledByUid' in request.resource.data)
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['accountStatus','disabledAt','disabledByUid','updatedAt']);
     }
     function isInitialGuard(data) {
       return isValidRole(data) && data.role == 'guard' && data.branchId == 'kokubunji'
+        && data.accountStatus == 'active' && data.leaderEligible == false
+        && data.createdAt == request.time && data.updatedAt == request.time;
+    }
+    function isInitialManagedGuard(data) {
+      return isValidRole(data) && data.role == 'guard'
+        && data.branchId == myRole().branchId
         && data.accountStatus == 'active' && data.leaderEligible == false
         && data.createdAt == request.time && data.updatedAt == request.time;
     }
@@ -48,13 +102,31 @@ service cloud.firestore {
         && (!data.undecided || (!data.day && !data.night && !data.unavailable));
     }
     function isValidAvailability(data,id) {
-      return data.keys().hasAll(['uid','branchId','date','day','night','unavailable','undecided','note','createdAt','updatedAt'])
-        && data.keys().hasOnly(['uid','branchId','date','day','night','unavailable','undecided','note','createdAt','updatedAt'])
-        && data.uid == request.auth.uid && data.branchId == myRole().branchId
+      return data.keys().hasAll(['uid','branchId','date','day','night','unavailable','undecided','note',
+          'updatedByUid','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
+        && data.keys().hasOnly(['uid','branchId','date','day','night','unavailable','undecided','note',
+          'updatedByUid','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
+        && data.branchId == myRole().branchId
         && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && id == data.date + '_' + data.uid && data.day is bool && data.night is bool
         && data.unavailable is bool && data.undecided is bool && validChoice(data)
-        && validText(data.note,0,500) && data.createdAt is timestamp && data.updatedAt is timestamp;
+        && validText(data.note,0,500)
+        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','staff']
+        && data.updatedAfterDeadline is bool
+        && data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+    function isSelfAvailability(data) {
+      return data.uid == request.auth.uid
+        && data.updatedByUid == request.auth.uid && data.updatedByType == 'self'
+        && data.updatedAfterDeadline == false;
+    }
+    function isManagedAvailability(data) {
+      return isOffice() && data.uid != request.auth.uid
+        && data.updatedByUid == request.auth.uid && data.updatedByType == 'staff'
+        && get(/databases/$(database)/documents/users/$(data.uid)).data.branchId == myRole().branchId
+        && get(/databases/$(database)/documents/users/$(data.uid)).data.inputMode == 'managed'
+        && get(rolePath(data.uid)).data.branchId == myRole().branchId
+        && get(rolePath(data.uid)).data.accountStatus == 'active';
     }
     function isValidRequest(data,uid) {
       return data.keys().hasAll(['uid','employeeNumber','name','branchId','status','createdAt','updatedAt'])
@@ -93,44 +165,90 @@ service cloud.firestore {
     }
 
     match /employeeNumbers/{number} {
-      allow create: if isOwner(request.resource.data.uid)
-        && request.resource.data.keys().hasOnly(['uid'])
-        && number.matches('^[0-9]{6}$') && request.auth.token.email == internalEmail(number)
-        && !exists(/databases/$(database)/documents/employeeNumbers/$(number));
+      allow create: if request.resource.data.keys().hasOnly(['uid'])
+        && number.matches('^[0-9]{6}$')
+        && !exists(/databases/$(database)/documents/employeeNumbers/$(number))
+        && (
+          (isOwner(request.resource.data.uid)
+            && request.auth.token.email == internalEmail(number))
+          || (isOffice()
+            && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.inputMode == 'managed'
+            && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.employeeNumber == number
+            && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.branchId == myRole().branchId
+            && getAfter(rolePath(request.resource.data.uid)).data.role == 'guard')
+        );
       allow get, list, update, delete: if false;
     }
     match /users/{uid} {
-      allow create: if isOwner(uid) && isValidUser(request.resource.data)
-        && request.auth.token.email == internalEmail(request.resource.data.employeeNumber)
-        && getAfter(/databases/$(database)/documents/employeeNumbers/$(request.resource.data.employeeNumber)).data.uid == uid
-        && getAfter(rolePath(uid)).data.role == 'guard'
-        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow create: if isValidUser(request.resource.data)
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+        && (
+          (isOwner(uid)
+            && request.resource.data.branchId == 'kokubunji'
+            && (!('inputMode' in request.resource.data) || request.resource.data.inputMode == 'web')
+            && (!('authUid' in request.resource.data) || request.resource.data.authUid == uid)
+            && !('createdBy' in request.resource.data)
+            && request.auth.token.email == internalEmail(request.resource.data.employeeNumber)
+            && getAfter(/databases/$(database)/documents/employeeNumbers/$(request.resource.data.employeeNumber)).data.uid == uid
+            && getAfter(rolePath(uid)).data.role == 'guard')
+          || (isOffice()
+            && isValidManagedUser(request.resource.data)
+            && request.resource.data.branchId == myRole().branchId
+            && request.resource.data.createdBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/employeeNumbers/$(request.resource.data.employeeNumber)).data.uid == uid
+            && getAfter(rolePath(uid)).data.role == 'guard'
+            && getAfter(rolePath(uid)).data.branchId == myRole().branchId)
+        );
       allow read: if isActive() && (isOwner(uid)
         || (isOffice() && resource.data.branchId == myRole().branchId));
-      allow update: if isActive() && isOwner(uid) && isValidUser(request.resource.data)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['employeeNumber','branchId','createdAt'])
-        && request.resource.data.updatedAt == request.time;
+      allow update: if isValidUser(request.resource.data)
+        && request.resource.data.updatedAt == request.time
+        && (
+          (isActive() && isOwner(uid)
+            && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['employeeNumber','branchId','inputMode','authUid','createdBy','createdAt']))
+          || (isOffice()
+            && resource.data.branchId == myRole().branchId
+            && resource.data.inputMode == 'managed' && resource.data.authUid == null
+            && request.resource.data.inputMode == 'managed' && request.resource.data.authUid == null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'name','postalCode','prefecture','city','addressLine','building',
+              'nearestStation','contactEmail','updatedAt'
+            ]))
+        );
       allow delete: if false;
     }
     match /userRoles/{uid} {
-      allow create: if isOwner(uid) && isInitialGuard(request.resource.data);
+      allow create: if (isOwner(uid) && isInitialGuard(request.resource.data))
+        || (isOffice() && isInitialManagedGuard(request.resource.data)
+          && getAfter(/databases/$(database)/documents/users/$(uid)).data.inputMode == 'managed'
+          && getAfter(/databases/$(database)/documents/users/$(uid)).data.authUid == null
+          && getAfter(/databases/$(database)/documents/users/$(uid)).data.createdBy == request.auth.uid);
       allow read: if isActive() && (isOwner(uid)
         || (isOffice() && resource.data.branchId == myRole().branchId));
-      allow update: if isAdmin() && isValidRole(request.resource.data)
-        && resource.data.role == 'guard' && request.resource.data.role == 'staff'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role','updatedAt'])
-        && request.resource.data.updatedAt == request.time
-        && get(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'pending'
-        && getAfter(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'approved';
+      allow update: if isValidRole(request.resource.data) && (
+        (isAdmin()
+          && resource.data.role == 'guard' && request.resource.data.role == 'staff'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role','updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && get(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'pending'
+          && getAfter(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'approved')
+        || isValidDeactivation(uid)
+        || isValidRestoration(uid)
+      );
       allow delete: if false;
     }
     match /availability/{id} {
       allow read: if isActive() && (resource.data.uid == request.auth.uid
         || (isOffice() && resource.data.branchId == myRole().branchId));
       allow create: if isActive() && isValidAvailability(request.resource.data,id)
+        && (isSelfAvailability(request.resource.data) || isManagedAvailability(request.resource.data))
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
-      allow update: if isActive() && resource.data.uid == request.auth.uid
-        && isValidAvailability(request.resource.data,id)
+      allow update: if isActive() && isValidAvailability(request.resource.data,id)
+        && (isSelfAvailability(request.resource.data) || isManagedAvailability(request.resource.data))
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.branchId == resource.data.branchId
+        && request.resource.data.date == resource.data.date
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
