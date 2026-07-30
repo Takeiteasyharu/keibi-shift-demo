@@ -21,18 +21,23 @@ let editingWorker = null;
 let pendingAccountAction = null;
 let openActionMenu = null;
 let openProxyCalendar;
+let refreshIntegratedManagement;
+let pendingWebEditWorker = null;
+let pendingProfileForm = null;
 
-export function initGuardManagement(elements, showScreen, showToast, proxyCalendar) {
+export function initGuardManagement(elements, showScreen, showToast, proxyCalendar, refreshManagement) {
   el = elements;
   navigate = showScreen;
   notify = showToast;
   openProxyCalendar = proxyCalendar;
+  refreshIntegratedManagement = refreshManagement;
   el.guardManagementSearch.addEventListener("input", renderActiveWorkers);
   el.newManagedGuardButton.addEventListener("click", () => openWorkerEditor());
   el.openDeletedAccountsButton.addEventListener("click", showDeletedAccounts);
-  el.backToGuardManagementButton.addEventListener("click", () => showGuardManagement());
+  el.backToGuardManagementButton.addEventListener("click", () =>
+    refreshIntegratedManagement ? refreshIntegratedManagement() : showGuardManagement());
   el.cancelManagedGuardButton.addEventListener("click", closeWorkerEditor);
-  el.saveManagedGuardButton.addEventListener("click", saveWorker);
+  el.saveManagedGuardButton.addEventListener("click", prepareSaveWorker);
   el.cancelAccountStatusButton.addEventListener("click", closeAccountConfirm);
   el.confirmAccountStatusButton.addEventListener("click", applyAccountStatusAction);
   el.managedGuardModal.addEventListener("click", event => {
@@ -40,6 +45,16 @@ export function initGuardManagement(elements, showScreen, showToast, proxyCalend
   });
   el.accountStatusConfirmModal.addEventListener("click", event => {
     if (event.target === el.accountStatusConfirmModal) closeAccountConfirm();
+  });
+  el.cancelWebProfileEditButton.addEventListener("click", closeWebEditConfirm);
+  el.confirmWebProfileEditButton.addEventListener("click", confirmWebEdit);
+  el.webProfileEditConfirmModal.addEventListener("click", event => {
+    if (event.target === el.webProfileEditConfirmModal) closeWebEditConfirm();
+  });
+  el.cancelProfileSaveButton.addEventListener("click", closeProfileSaveConfirm);
+  el.confirmProfileSaveButton.addEventListener("click", confirmProfileSave);
+  el.profileSaveConfirmModal.addEventListener("click", event => {
+    if (event.target === el.profileSaveConfirmModal) closeProfileSaveConfirm();
   });
   document.addEventListener("click", event => {
     if (openActionMenu && !event.target.closest(".worker-action-menu-wrap")) closeActionMenu();
@@ -49,7 +64,20 @@ export function initGuardManagement(elements, showScreen, showToast, proxyCalend
     closeActionMenu();
     if (el.managedGuardModal.classList.contains("show")) closeWorkerEditor();
     if (el.accountStatusConfirmModal.classList.contains("show")) closeAccountConfirm();
+    if (el.webProfileEditConfirmModal.classList.contains("show")) closeWebEditConfirm();
+    if (el.profileSaveConfirmModal.classList.contains("show")) closeProfileSaveConfirm();
   });
+}
+
+export function createIntegratedWorkerMenu(worker, profile, role) {
+  currentProfile = profile;
+  currentRole = role;
+  return createWorkerActionMenu(worker);
+}
+
+export function setGuardManagementContext(profile, role) {
+  currentProfile = profile;
+  currentRole = role;
 }
 
 export async function showGuardManagement(profile = currentProfile, role = currentRole) {
@@ -221,9 +249,9 @@ function createWorkerActionMenu(worker) {
   menu.className = "worker-action-menu";
   menu.hidden = true;
 
-  if (worker.inputMode === "managed") {
-    menu.appendChild(createMenuButton("編集", () => openWorkerEditor(worker)));
-    menu.appendChild(createMenuButton("代理入力", () => openProxyCalendar(worker, "guardManagement")));
+  if (canEditWorker(worker)) menu.appendChild(createMenuButton("編集", () => requestWorkerEdit(worker)));
+  if (canProxyInput(worker)) {
+    menu.appendChild(createMenuButton("勤務希望を代理入力", () => openProxyCalendar(worker, "admin")));
   }
   if (canDisable(worker)) {
     menu.appendChild(createMenuButton("退職・利用停止", () => openAccountConfirm("disable", worker), true));
@@ -265,6 +293,24 @@ function closeActionMenu() {
   openActionMenu.menu.hidden = true;
   openActionMenu.trigger.setAttribute("aria-expanded", "false");
   openActionMenu = null;
+}
+
+function canProxyInput(worker) {
+  const inputMode = worker.inputMode === "managed" ? "managed" : "web";
+  return worker.accountStatus === "active" &&
+    ["managed", "web"].includes(inputMode) &&
+    (worker.id || worker.uid) !== currentProfile?.uid &&
+    worker.branchId === currentRole?.branchId &&
+    ["staff", "admin"].includes(currentRole?.role) &&
+    (currentRole.role === "admin" || worker.role !== "admin");
+}
+
+function canEditWorker(worker) {
+  return worker.accountStatus === "active" &&
+    (worker.id || worker.uid) !== currentProfile?.uid &&
+    worker.branchId === currentRole?.branchId &&
+    ["staff", "admin"].includes(currentRole?.role) &&
+    (currentRole.role === "admin" || worker.role !== "admin");
 }
 
 function canDisable(worker) {
@@ -352,7 +398,8 @@ async function applyAccountStatusAction() {
       notify(`${worker.name}さんの利用を再開しました。`);
     }
     closeAccountConfirm();
-    await loadWorkers();
+    if (refreshIntegratedManagement) await refreshIntegratedManagement();
+    else await loadWorkers();
   } catch (error) {
     console.error(error);
     const target = action === "restore" ? el.deletedAccountsMessage : el.guardManagementMessage;
@@ -367,10 +414,14 @@ async function applyAccountStatusAction() {
 
 function openWorkerEditor(worker = null) {
   editingWorker = worker;
-  el.managedGuardModalTitle.textContent = worker ? "代理入力警備員を編集" : "新しい警備員を登録";
+  const isWeb = worker && worker.inputMode !== "managed";
+  el.managedGuardModalTitle.textContent = worker
+    ? `${isWeb ? "Web利用者" : "代理入力警備員"}を編集`
+    : "新しい警備員を登録";
   el.managedGuardEmployeeNumber.value = worker?.employeeNumber || "";
   el.managedGuardEmployeeNumber.readOnly = Boolean(worker);
   el.managedGuardName.value = worker?.name || "";
+  el.managedGuardPhone.value = worker?.phone || "";
   el.managedGuardPostalCode.value = worker?.postalCode || "";
   el.managedGuardPrefecture.value = worker?.prefecture || "";
   el.managedGuardCity.value = worker?.city || "";
@@ -378,9 +429,40 @@ function openWorkerEditor(worker = null) {
   el.managedGuardBuilding.value = worker?.building || "";
   el.managedGuardNearestStation.value = worker?.nearestStation || "";
   el.managedGuardContactEmail.value = worker?.contactEmail || "";
+  el.managedGuardContactEmail.readOnly = Boolean(isWeb);
+  el.managedGuardContactEmailLabel.hidden = Boolean(isWeb);
+  el.managedGuardFixedInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "代理入力"}`;
+  el.managedGuardFixedRole.textContent = `区分：${worker ? roleLabel(worker.role) : "警備員"}`;
+  el.managedGuardFixedStatus.textContent = `状態：${worker?.accountStatus || "active"}`;
   clearMessage(el.managedGuardFormMessage);
   el.managedGuardModal.classList.add("show");
   requestAnimationFrame(() => (worker ? el.managedGuardName : el.managedGuardEmployeeNumber).focus());
+}
+
+function requestWorkerEdit(worker) {
+  if (!canEditWorker(worker)) return;
+  if (worker.inputMode === "managed") {
+    openWorkerEditor(worker);
+    return;
+  }
+  pendingWebEditWorker = worker;
+  el.webProfileEditConfirmMessage.textContent =
+    `この警備員は本人がWebからプロフィールを管理できます。\n\n` +
+    `内勤者が編集すると、本人が登録している情報を変更します。\n` +
+    `本人から変更依頼を受けていることを確認してください。\n\n` +
+    `対象：\n警備員番号：${worker.employeeNumber}\n氏名：${worker.name}`;
+  el.webProfileEditConfirmModal.classList.add("show");
+}
+
+function closeWebEditConfirm() {
+  pendingWebEditWorker = null;
+  el.webProfileEditConfirmModal.classList.remove("show");
+}
+
+function confirmWebEdit() {
+  const worker = pendingWebEditWorker;
+  closeWebEditConfirm();
+  if (worker && canEditWorker(worker)) openWorkerEditor(worker);
 }
 
 function closeWorkerEditor() {
@@ -389,21 +471,48 @@ function closeWorkerEditor() {
   el.managedGuardModal.classList.remove("show");
 }
 
-async function saveWorker() {
+function prepareSaveWorker() {
   const form = readForm();
   const errors = validateForm(form);
   if (errors.length) {
     showMessage(el.managedGuardFormMessage, errors.join("・"), true);
     return;
   }
+  if (!editingWorker) {
+    saveWorker(form);
+    return;
+  }
+  pendingProfileForm = form;
+  el.profileSaveConfirmMessage.textContent =
+    `対象：\n警備員番号：${editingWorker.employeeNumber}\n氏名：${editingWorker.name}\n\n` +
+    "プロフィール情報を更新します。よろしいですか？";
+  el.profileSaveConfirmModal.classList.add("show");
+}
+
+function closeProfileSaveConfirm() {
+  pendingProfileForm = null;
+  el.profileSaveConfirmModal.classList.remove("show");
+}
+
+async function confirmProfileSave() {
+  if (!pendingProfileForm || !editingWorker) return;
+  const form = pendingProfileForm;
+  el.profileSaveConfirmModal.classList.remove("show");
+  pendingProfileForm = null;
+  await saveWorker(form);
+}
+
+async function saveWorker(form) {
   el.saveManagedGuardButton.disabled = true;
+  el.confirmProfileSaveButton.disabled = true;
   const wasEditing = Boolean(editingWorker);
   try {
-    if (editingWorker) await updateManagedWorker(form);
+    if (editingWorker) await updateWorkerProfile(form);
     else await createManagedWorker(form);
     closeWorkerEditor();
     notify(wasEditing ? "警備員情報を更新しました。" : "代理入力警備員を登録しました。");
-    await loadWorkers();
+    if (refreshIntegratedManagement) await refreshIntegratedManagement();
+    else await loadWorkers();
   } catch (error) {
     console.error(error);
     const message = !editingWorker && ["permission-denied", "already-exists"].includes(error?.code)
@@ -412,6 +521,7 @@ async function saveWorker() {
     showMessage(el.managedGuardFormMessage, message, true);
   } finally {
     el.saveManagedGuardButton.disabled = false;
+    el.confirmProfileSaveButton.disabled = false;
   }
 }
 
@@ -419,6 +529,7 @@ function readForm() {
   return {
     employeeNumber: el.managedGuardEmployeeNumber.value.trim(),
     name: el.managedGuardName.value.trim(),
+    phone: el.managedGuardPhone.value.trim(),
     postalCode: el.managedGuardPostalCode.value.replace(/\D/g, ""),
     prefecture: el.managedGuardPrefecture.value.trim(),
     city: el.managedGuardCity.value.trim(),
@@ -433,6 +544,7 @@ function validateForm(form) {
   const errors = [];
   if (!/^\d{6}$/.test(form.employeeNumber)) errors.push("警備員番号は6桁で入力してください");
   if (!form.name || form.name.length > 80) errors.push("氏名を80文字以内で入力してください");
+  if (form.phone && !/^[0-9+\-() 　]{6,20}$/.test(form.phone)) errors.push("電話番号を20文字以内で入力してください");
   if (!/^\d{7}$/.test(form.postalCode)) errors.push("郵便番号は7桁で入力してください");
   if (!form.prefecture || !form.city || !form.addressLine) errors.push("住所を入力してください");
   if (!form.nearestStation) errors.push("最寄り駅を入力してください");
@@ -472,18 +584,21 @@ async function createManagedWorker(form) {
   await batch.commit();
 }
 
-function updateManagedWorker(form) {
-  return updateDoc(doc(db, "users", editingWorker.id), {
+function updateWorkerProfile(form) {
+  const values = {
     name: form.name,
+    phone: form.phone,
     postalCode: form.postalCode,
     prefecture: form.prefecture,
     city: form.city,
     addressLine: form.addressLine,
     building: form.building,
     nearestStation: form.nearestStation,
-    contactEmail: form.contactEmail,
+    updatedByUid: currentProfile.uid,
     updatedAt: serverTimestamp()
-  });
+  };
+  if (editingWorker.inputMode === "managed") values.contactEmail = form.contactEmail;
+  return updateDoc(doc(db, "users", editingWorker.id || editingWorker.uid), values);
 }
 
 function appendTextCell(row, value) {

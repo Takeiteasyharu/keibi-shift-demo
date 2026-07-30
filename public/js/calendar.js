@@ -1,4 +1,4 @@
-import { getAvailability, saveAvailability } from "./availability.js";
+import { getAvailability, saveAvailability } from "./availability.js?v=20260730-2";
 
 const HOLIDAYS_2026 = {
   "2026-01-01": "元日", "2026-01-12": "成人の日", "2026-02-11": "建国記念の日",
@@ -8,6 +8,13 @@ const HOLIDAYS_2026 = {
   "2026-09-21": "敬老の日", "2026-09-22": "国民の休日", "2026-09-23": "秋分の日",
   "2026-10-12": "スポーツの日", "2026-11-03": "文化の日", "2026-11-23": "勤労感謝の日"
 };
+const PROXY_REASON_LABELS = {
+  phone_request: "本人から電話で依頼",
+  in_person_request: "本人から対面で依頼",
+  paper_transfer: "紙の勤務希望表を転記",
+  staff_correction: "内勤者による入力内容の訂正",
+  other: "その他"
+};
 
 const state = {
   viewDate: new Date(),
@@ -16,6 +23,9 @@ const state = {
   profile: null,
   proxy: false,
   operatorUid: "",
+  operatorRole: "",
+  inputMode: "web",
+  pendingSave: null,
   returnAction: null
 };
 let el;
@@ -42,8 +52,18 @@ export function initCalendar(elements, showToast) {
   el.choiceUndecided.addEventListener("click", () => toggleDraft("undecided"));
   el.saveShiftButton.addEventListener("click", save);
   el.exitProxyInputButton.addEventListener("click", () => state.returnAction?.());
+  el.proxyUpdateReason.addEventListener("change", updateReasonNoteVisibility);
+  el.cancelProxyReasonButton.addEventListener("click", closeProxyReasonModal);
+  el.continueProxyReasonButton.addEventListener("click", showProxySaveConfirmation);
+  el.backProxyReasonButton.addEventListener("click", showProxyReasonStep);
+  el.confirmProxySaveButton.addEventListener("click", confirmProxySave);
+  el.proxyReasonModal.addEventListener("click", event => {
+    if (event.target === el.proxyReasonModal) closeProxyReasonModal();
+  });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && el.shiftModalBackdrop.classList.contains("show")) closeModal();
+    if (event.key !== "Escape") return;
+    if (el.proxyReasonModal.classList.contains("show")) closeProxyReasonModal();
+    else if (el.shiftModalBackdrop.classList.contains("show")) closeModal();
   });
 }
 
@@ -51,14 +71,21 @@ export function showCalendar(profile, options = {}) {
   state.profile = profile;
   state.proxy = Boolean(options.proxy);
   state.operatorUid = options.operatorUid || profile.uid;
+  state.operatorRole = options.operatorRole || "";
+  state.inputMode = options.inputMode || profile.inputMode || "web";
+  state.pendingSave = null;
   state.returnAction = options.returnAction || null;
   state.viewDate = new Date();
   el.currentUserName.textContent = profile.name;
   el.currentUserId.textContent = profile.employeeNumber;
   el.proxyInputBanner.hidden = !state.proxy;
   if (state.proxy) {
-    el.proxyInputTitle.textContent = `${profile.name}さんの勤務希望を代理入力中`;
+    const isWeb = state.inputMode === "web";
+    el.proxyInputTitle.textContent = isWeb ? "Web利用者の勤務希望を代理入力中" : "代理入力中";
     el.proxyInputEmployeeNumber.textContent = `警備員番号：${profile.employeeNumber}`;
+    el.proxyInputName.textContent = `氏名：${profile.name}`;
+    el.proxyInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "代理入力"}`;
+    el.proxyInputWarning.hidden = !isWeb;
   }
   renderCalendar();
 }
@@ -187,18 +214,37 @@ async function save() {
   const lock = getLockState(state.selectedDate);
   const afterDeadline = isPastDate(state.selectedDate) || lock.dayLocked || lock.nightLocked;
   if (!state.proxy && (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked))) return;
-  if (state.proxy && afterDeadline && !window.confirm("締切後ですが、この内容で変更しますか？")) return;
   const existing = normalizeAvailability(getAvailability(state.selectedDate));
   const next = normalizeAvailability({ ...state.draft, note: el.shiftNote.value });
   if (!state.proxy && lock.dayLocked) next.day = existing.day;
   if (!state.proxy && lock.nightLocked) next.night = existing.night;
+  if (sameAvailability(existing, next)) {
+    closeModal();
+    notify("勤務希望は変更されていません。");
+    return;
+  }
+  if (state.proxy && afterDeadline && !window.confirm("締切後ですが、この内容で変更しますか？")) return;
+  if (state.proxy) {
+    state.pendingSave = { next, afterDeadline };
+    openProxyReasonModal();
+    return;
+  }
+  await performSave(next, afterDeadline);
+}
+
+async function performSave(next, afterDeadline, reason = "", reasonNote = "") {
   el.saveShiftButton.disabled = true;
+  el.confirmProxySaveButton.disabled = true;
   try {
     await saveAvailability(state.profile.uid, state.selectedDate, next, state.profile.branchId, {
       updatedByUid: state.operatorUid,
-      updatedByType: state.proxy ? "staff" : "self",
+      updatedByType: state.proxy ? "proxy" : "self",
+      updatedByRole: state.proxy ? state.operatorRole : "",
+      updateReason: state.proxy ? reason : "",
+      updateReasonNote: state.proxy ? reasonNote : "",
       updatedAfterDeadline: state.proxy && afterDeadline
     });
+    closeProxyReasonModal();
     closeModal();
     renderCalendar();
     notify(state.proxy ? `${state.profile.name}さんの勤務希望を代理入力しました。` : "勤務希望を保存しました。");
@@ -207,7 +253,79 @@ async function save() {
     notify("保存できませんでした。通信状態を確認してください。");
   } finally {
     el.saveShiftButton.disabled = false;
+    el.confirmProxySaveButton.disabled = false;
   }
+}
+
+function sameAvailability(left, right) {
+  return ["day", "night", "unavailable", "undecided", "note"]
+    .every(key => key === "note"
+      ? String(left[key] || "").trim() === String(right[key] || "").trim()
+      : Boolean(left[key]) === Boolean(right[key]));
+}
+
+function openProxyReasonModal() {
+  el.proxyUpdateReason.value = "";
+  el.proxyUpdateReasonNote.value = "";
+  el.proxyReasonMessage.className = "message";
+  el.proxyReasonMessage.textContent = "";
+  updateReasonNoteVisibility();
+  showProxyReasonStep();
+  el.proxyReasonModal.classList.add("show");
+}
+
+function closeProxyReasonModal() {
+  el.proxyReasonModal.classList.remove("show");
+  state.pendingSave = null;
+}
+
+function updateReasonNoteVisibility() {
+  el.proxyUpdateReasonNoteWrap.hidden = el.proxyUpdateReason.value !== "other";
+}
+
+function showProxyReasonStep() {
+  el.proxyReasonStep.hidden = false;
+  el.proxyConfirmStep.hidden = true;
+}
+
+function showProxySaveConfirmation() {
+  const reason = el.proxyUpdateReason.value;
+  const reasonNote = el.proxyUpdateReasonNote.value.trim();
+  if (!PROXY_REASON_LABELS[reason]) {
+    showReasonError("変更理由を選択してください。");
+    return;
+  }
+  if (reason === "other" && !reasonNote) {
+    showReasonError("「その他」の理由の詳細を入力してください。");
+    return;
+  }
+  if (reasonNote.length > 200) {
+    showReasonError("理由の詳細は200文字以内で入力してください。");
+    return;
+  }
+  el.proxyReasonMessage.className = "message";
+  const warning = state.inputMode === "web"
+    ? "\n\n本人が入力した勤務希望を上書きする可能性があります。"
+    : "";
+  const note = reason === "other" ? `\n詳細：${reasonNote}` : "";
+  el.proxySaveConfirmation.textContent =
+    `対象：\n警備員番号：${state.profile.employeeNumber}\n氏名：${state.profile.name}\n\n` +
+    `変更理由：\n${PROXY_REASON_LABELS[reason]}${note}\n\nこの内容で保存しますか？${warning}`;
+  el.proxyReasonStep.hidden = true;
+  el.proxyConfirmStep.hidden = false;
+}
+
+function showReasonError(message) {
+  el.proxyReasonMessage.textContent = message;
+  el.proxyReasonMessage.className = "message show error";
+}
+
+async function confirmProxySave() {
+  if (!state.pendingSave) return;
+  const reason = el.proxyUpdateReason.value;
+  const reasonNote = reason === "other" ? el.proxyUpdateReasonNote.value.trim() : "";
+  const { next, afterDeadline } = state.pendingSave;
+  await performSave(next, afterDeadline, reason, reasonNote);
 }
 
 function emptyAvailability() {

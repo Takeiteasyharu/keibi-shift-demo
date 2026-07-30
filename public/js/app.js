@@ -1,11 +1,12 @@
 import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard } from "./auth.js?v=20260722-3";
-import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js";
-import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-1";
-import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260730-1";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260730-1";
-import { initGuardManagement, showGuardManagement } from "./guard-management.js?v=20260730-1";
+import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260730-2";
+import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-2";
+import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260730-3";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260730-3";
+import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showGuardManagement } from "./guard-management.js?v=20260730-5";
 import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260730-1";
-import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260730-1";
+import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260730-3";
+import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260730-2";
 
 const el = {};
 let toastTimer;
@@ -14,41 +15,51 @@ let roleData;
 let stopRoleObserver;
 let registrationInProgress = false;
 let showShiftBuilder;
+let pendingWebProxyResolve;
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
-  initAdmin(el, showScreen, openProxyCalendar);
+  initAdmin(el, showScreen, createIntegratedWorkerMenu);
   initCalendar(el, showToast);
   showShiftBuilder = initShifts(el, showScreen, showToast);
-  initGuardManagement(el, showScreen, showToast, openProxyCalendar);
+  initGuardManagement(el, showScreen, showToast, openProxyCalendar, () => showAdmin(profile, roleData));
   initProxyInput(el, showScreen, openProxyCalendar);
   initShiftConfirmation(el, showScreen);
+  initShiftProgress(el, showScreen, showToast);
   bindEvents();
   observeAuthState(handleAuthState);
 });
 
 function cacheElements() {
-  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen",
+  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
    "showRegisterButton","forgotPasswordButton","regGuardId","regName","regEmail","regZip",
    "regPref","regCity","regStreet","regBuilding","regNearestStation","regPassword",
    "regPasswordConfirm","regStaffRequested","staffRequestFields","regStaffName","regStaffBranch",
-   "registerButton","backLoginButton","currentUserName","currentUserId","logoutButton","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","exitProxyInputButton",
+   "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
    "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
    "adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
-   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
-   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuRequestsButton","menuGuardManagementButton","menuProxyInputButton","menuLogoutButton",
+   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","dailyProgressMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
+   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuDailyProgressButton","menuRequestsButton","menuLogoutButton",
    "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
    "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
-   "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName",
+   "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName","managedGuardPhone",
    "managedGuardPostalCode","managedGuardPrefecture","managedGuardCity","managedGuardAddressLine","managedGuardBuilding",
-   "managedGuardNearestStation","managedGuardContactEmail","saveManagedGuardButton","cancelManagedGuardButton",
+   "managedGuardNearestStation","managedGuardContactEmailLabel","managedGuardContactEmail","saveManagedGuardButton","cancelManagedGuardButton",
+   "managedGuardFixedInputMode","managedGuardFixedRole","managedGuardFixedStatus",
+   "webProfileEditConfirmModal","webProfileEditConfirmMessage","cancelWebProfileEditButton","confirmWebProfileEditButton",
+   "profileSaveConfirmModal","profileSaveConfirmMessage","cancelProfileSaveButton","confirmProfileSaveButton",
+   "webProxyConfirmModal","webProxyConfirmMessage","cancelWebProxyButton","startWebProxyButton",
+   "proxyReasonModal","proxyReasonStep","proxyConfirmStep","proxyUpdateReason","proxyUpdateReasonNoteWrap","proxyUpdateReasonNote","proxyReasonMessage","cancelProxyReasonButton","continueProxyReasonButton","proxySaveConfirmation","backProxyReasonButton","confirmProxySaveButton",
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
    "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
    "ownShiftsMessage","ownShiftsList","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
+   "shiftMembersModal","shiftMembersTitle","shiftMembersSummary","shiftMembersList","closeShiftMembersButton",
+   "dailyProgressMessage","progressDate","progressShiftType","progressFilters","dailyProgressTableBody","dailyProgressCards",
+   "departureTimeModal","departureTimeInput","departureTimeMessage","cancelDepartureTimeButton","confirmDepartureTimeButton",
    "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton",
-   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
+   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftDepartureCheckTime","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
    "shiftOperationConfirmModal","shiftOperationConfirmTitle","shiftOperationConfirmMessage","confirmShiftOperationButton","cancelShiftOperationButton",
    "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails",
@@ -68,31 +79,36 @@ function bindEvents() {
     if (el.regStaffRequested.checked && !el.regStaffName.value) el.regStaffName.value = el.regName.value;
   });
   el.registerButton.addEventListener("click", register);
-  el.logoutButton.addEventListener("click", signOutUser);
   el.openAdminButton.addEventListener("click", openMenu);
-  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton]
+  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton, el.dailyProgressMenuButton]
     .forEach(button => button.addEventListener("click", openMenu));
   el.closeMenuButton.addEventListener("click", closeMenu);
   el.sideMenuBackdrop.addEventListener("click", event => { if (event.target === el.sideMenuBackdrop) closeMenu(); });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    closeMenu();
+    if (el.webProxyConfirmModal.classList.contains("show")) closeWebProxyConfirm(false);
+  });
   el.menuAdminButton.addEventListener("click", async () => { closeMenu(); await showAdmin(profile, roleData); });
   el.menuShiftBuilderButton.addEventListener("click", async () => { closeMenu(); await showShiftBuilder(profile, roleData); });
-  el.menuGuardManagementButton.addEventListener("click", async () => {
-    closeMenu();
-    await showGuardManagement(profile, roleData);
-  });
-  el.menuProxyInputButton.addEventListener("click", async () => {
-    closeMenu();
-    await showProxyWorkerList(profile, roleData);
-  });
   el.menuOwnShiftsButton.addEventListener("click", () => {
     closeMenu();
     showOwnShifts(profile);
+  });
+  el.menuDailyProgressButton.addEventListener("click", async () => {
+    closeMenu();
+    await showDailyProgress(profile, roleData);
   });
   el.menuCalendarButton.addEventListener("click", async () => {
     closeMenu(); await loadOwnAvailability(profile.uid); showScreen("calendar"); showCalendar(profile);
   });
   el.menuRequestsButton.addEventListener("click", async () => { closeMenu(); await showRequests(); });
   el.menuLogoutButton.addEventListener("click", signOutUser);
+  el.cancelWebProxyButton.addEventListener("click", () => closeWebProxyConfirm(false));
+  el.startWebProxyButton.addEventListener("click", () => closeWebProxyConfirm(true));
+  el.webProxyConfirmModal.addEventListener("click", event => {
+    if (event.target === el.webProxyConfirmModal) closeWebProxyConfirm(false);
+  });
 }
 
 async function handleAuthState(user) {
@@ -118,13 +134,13 @@ async function handleRoleChange(nextRole) {
     return;
   }
   roleData = nextRole;
+  setGuardManagementContext(profile, roleData);
   const isOffice = ["staff", "admin"].includes(roleData.role);
   el.openAdminButton.hidden = false;
   el.menuAdminButton.hidden = !isOffice;
   el.menuShiftBuilderButton.hidden = !isOffice;
-  el.menuGuardManagementButton.hidden = !isOffice;
-  el.menuProxyInputButton.hidden = !isOffice;
   el.menuRequestsButton.hidden = !isOffice;
+  el.menuDailyProgressButton.hidden = !isOffice;
   el.menuCalendarButton.textContent = isOffice ? "自分の勤務希望" : "勤務希望入力";
   el.menuOwnShiftsButton.textContent = isOffice ? "自分のシフト" : "シフト確認";
   if (isOffice) await showAdmin(profile, roleData);
@@ -231,12 +247,14 @@ function showScreen(name) {
   const screens = {login:el.loginScreen, register:el.registerScreen, calendar:el.calendarScreen,
     admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen,
     guardManagement:el.guardManagementScreen, deletedAccounts:el.deletedAccountsScreen,
-    proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen};
+    proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen, dailyProgress:el.dailyProgressScreen};
   Object.values(screens).forEach(screen => screen?.classList.remove("active"));
   screens[name]?.classList.add("active"); window.scrollTo({top:0, behavior:"smooth"});
 }
 async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
-  if (!["staff", "admin"].includes(roleData?.role) || worker?.inputMode !== "managed") return;
+  if (!canProxyInput(worker)) return;
+  const inputMode = worker.inputMode === "managed" ? "managed" : "web";
+  if (inputMode === "web" && !await confirmWebProxyStart(worker)) return;
   try {
     await loadOwnAvailability(worker.id || worker.uid, worker.branchId || roleData.branchId);
   } catch (error) {
@@ -249,12 +267,39 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   showCalendar({ ...worker, uid: worker.id || worker.uid }, {
     proxy: true,
     operatorUid: profile.uid,
+    operatorRole: roleData.role,
+    inputMode,
     returnAction: async () => {
       if (returnScreen === "guardManagement") await showGuardManagement(profile, roleData);
       else if (returnScreen === "admin") await showAdmin(profile, roleData);
       else await showProxyWorkerList(profile, roleData);
     }
   });
+}
+function canProxyInput(worker) {
+  const workerUid = worker?.id || worker?.uid;
+  const inputMode = worker?.inputMode === "managed" ? "managed" : "web";
+  return ["staff", "admin"].includes(roleData?.role) &&
+    ["managed", "web"].includes(inputMode) &&
+    worker?.accountStatus === "active" &&
+    worker?.branchId === roleData.branchId &&
+    workerUid !== profile?.uid &&
+    (roleData.role === "admin" || worker?.role !== "admin");
+}
+function confirmWebProxyStart(worker) {
+  el.webProxyConfirmMessage.textContent =
+    `この警備員は本人がWebから勤務希望を入力できます。\n` +
+    `代理入力を行うと、本人が入力した内容を上書きする可能性があります。\n\n` +
+    `本人から電話・対面などで変更依頼を受けていることを確認してください。\n\n` +
+    `対象：\n警備員番号：${worker.employeeNumber}\n氏名：${worker.name}`;
+  el.webProxyConfirmModal.classList.add("show");
+  return new Promise(resolve => { pendingWebProxyResolve = resolve; });
+}
+function closeWebProxyConfirm(result) {
+  el.webProxyConfirmModal.classList.remove("show");
+  const resolve = pendingWebProxyResolve;
+  pendingWebProxyResolve = null;
+  resolve?.(result);
 }
 async function runButtonTask(button, task) { button.disabled=true; try { await task(); } finally { button.disabled=false; } }
 function showMessage(target, text, error) { target.textContent=text; target.className=`message show ${error?"error":"success"}`; }

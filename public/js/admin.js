@@ -6,12 +6,12 @@ let navigate;
 let currentProfile;
 let currentRole;
 let activeFilter = "all";
-let openProxyCalendar;
+let createWorkerMenu;
 
-export function initAdmin(elements, showScreen, proxyCalendar) {
+export function initAdmin(elements, showScreen, workerMenuFactory) {
   el = elements;
   navigate = showScreen;
-  openProxyCalendar = proxyCalendar;
+  createWorkerMenu = workerMenuFactory;
   const today = toLocalDateKey(new Date());
   el.adminDate.value = today;
   el.adminSearchButton.addEventListener("click", renderAdmin);
@@ -56,7 +56,10 @@ async function renderAdmin() {
   const roles = new Map(rolesSnapshot.docs.map(d => [d.id, d.data()]));
   // Firestore document ID is the authoritative Authentication UID.
   // Ignore a legacy `uid` field inside users documents if one exists.
-  const users = usersSnapshot.docs.map(d => ({ ...d.data(), uid: d.id }));
+  const users = usersSnapshot.docs.map(d => {
+    const data = d.data();
+    return { ...data, inputMode: data.inputMode === "managed" ? "managed" : "web", uid: d.id };
+  });
   const usersByUid = new Map(users.map(user => [user.uid, user]));
   const usersByEmployeeNumber = new Map(users.map(user => [user.employeeNumber, user]));
   const availability = new Map();
@@ -93,7 +96,7 @@ async function renderAdmin() {
     const shift = user.shift || {};
     const status = shift.unavailable ? "勤務不可" : shift.undecided ? "未定" :
       shift.day && shift.night ? "日勤・夜勤" : shift.day ? "日勤" : shift.night ? "夜勤" : "未入力";
-    const updateType = shift.updatedByType === "staff" ? "代理入力" : shift.updatedByType === "self" ? "本人入力" : "記録なし";
+    const updateType = ["staff", "proxy"].includes(shift.updatedByType) ? "代理入力" : shift.updatedByType === "self" ? "本人入力" : "記録なし";
     const tr = document.createElement("tr");
     tr.className = "admin-summary-row";
     const identityCell = document.createElement("td");
@@ -118,8 +121,7 @@ async function renderAdmin() {
       summaryLine(`メール：${user.contactEmail || "―"}`)
     );
     const actionCell = document.createElement("td");
-    if (user.inputMode === "managed") actionCell.appendChild(proxyButton(user));
-    else actionCell.textContent = "―";
+    actionCell.appendChild(createWorkerMenu(user, currentProfile, currentRole));
     tr.append(identityCell, wishCell, noteCell, contactCell, actionCell);
     el.adminTableBody.appendChild(tr);
     const card = document.createElement("article");
@@ -132,7 +134,7 @@ async function renderAdmin() {
     details.textContent = `${user.employeeNumber}\n${status}\n${updateType}\n${shift.note || "備考なし"}\n` +
       `${user.prefecture}${user.city}${user.addressLine}${user.building || ""}\n最寄り駅：${user.nearestStation || "―"}\n${user.contactEmail}`;
     card.append(heading, details);
-    if (user.inputMode === "managed") card.appendChild(proxyButton(user));
+    card.appendChild(createWorkerMenu(user, currentProfile, currentRole));
     el.adminCards.appendChild(card);
   });
   if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="5">該当する利用者はいません</td></tr>';
@@ -150,14 +152,6 @@ function summaryRoleLine(user) {
   line.className = "admin-summary-line admin-summary-name";
   appendRoleName(line, user);
   return line;
-}
-
-function proxyButton(user) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "代理入力";
-  button.addEventListener("click", () => openProxyCalendar(user, "admin"));
-  return button;
 }
 
 function appendRoleName(container, user) {

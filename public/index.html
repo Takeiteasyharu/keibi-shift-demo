@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260730-2">
+  <link rel="stylesheet" href="./css/style.css?v=20260730-7">
 </head>
 <body>
   <main class="app">
@@ -104,6 +104,9 @@
       <div id="proxyInputBanner" class="proxy-input-banner" hidden>
         <strong id="proxyInputTitle"></strong>
         <span id="proxyInputEmployeeNumber"></span>
+        <span id="proxyInputName"></span>
+        <span id="proxyInputMode"></span>
+        <strong id="proxyInputWarning" class="proxy-input-warning" hidden>本人が入力した内容を上書きする可能性があります。</strong>
         <button id="exitProxyInputButton" class="secondary" type="button">代理入力を終了して戻る</button>
       </div>
       <div class="header">
@@ -112,7 +115,6 @@
           <div class="user-line"><span id="currentUserName"></span> / 警備員番号 <span id="currentUserId"></span></div>
         </div>
         <div class="actions">
-          <button id="logoutButton" class="secondary" type="button">ログアウト</button>
           <button id="openAdminButton" class="menu-button" type="button" aria-label="メニューを開く" hidden>≡</button>
         </div>
       </div>
@@ -162,6 +164,11 @@
       </div>
 
       <div class="panel">
+        <div class="integrated-management-actions">
+          <button id="newManagedGuardButton" class="wide-action" type="button">＋ 新しい警備員を登録</button>
+          <button id="openDeletedAccountsButton" class="secondary" type="button">削除済みアカウント</button>
+          <p class="small-text">新規登録は、Webを利用せず内勤者が勤務希望を代理入力する警備員が対象です。</p>
+        </div>
         <div class="admin-tools">
           <div>
             <label for="adminDate">表示対象の日付</label>
@@ -219,6 +226,26 @@
       <div id="ownShiftsList" class="own-shifts-list"></div>
     </section>
 
+    <section id="dailyProgressScreen" class="screen" aria-labelledby="dailyProgressTitle">
+      <div class="header"><div><h1 id="dailyProgressTitle">当日の勤務状況</h1><div class="user-line">出発確認・出発・到着の状況</div></div>
+        <button id="dailyProgressMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div class="panel progress-toolbar">
+        <label>日付<input id="progressDate" type="date"></label>
+        <label>勤務帯<select id="progressShiftType"><option value="day">日勤</option><option value="night">夜勤</option></select></label>
+        <div id="progressFilters" class="filter-buttons">
+          <button type="button" class="active" data-progress-filter="all">全員</button>
+          <button type="button" data-progress-filter="not-departed">未出発</button>
+          <button type="button" data-progress-filter="not-arrived">未到着</button>
+          <button type="button" data-progress-filter="arrived">到着済</button>
+        </div>
+      </div>
+      <div id="dailyProgressMessage" class="message" role="status"></div>
+      <div class="desktop-table"><table><thead><tr><th>警備員</th><th>現場名</th><th>役割</th><th>出発確認</th><th>出発</th><th>到着</th><th>代理更新</th></tr></thead>
+        <tbody id="dailyProgressTableBody"></tbody></table></div>
+      <div id="dailyProgressCards" class="daily-progress-cards"></div>
+    </section>
+
     <section id="proxyWorkerScreen" class="screen" aria-labelledby="proxyWorkerTitle">
       <div class="header">
         <div>
@@ -259,8 +286,6 @@
       </div>
       <div id="guardManagementMessage" class="message" role="alert"></div>
       <div class="panel guard-management-tools">
-        <button id="newManagedGuardButton" class="wide-action" type="button">＋ 新しい警備員を登録</button>
-        <button id="openDeletedAccountsButton" class="secondary" type="button">削除済みアカウント</button>
         <p class="small-text">ここでは、Webを利用せず内勤者が勤務希望を代理入力する警備員を登録します。</p>
         <label for="guardManagementSearch">氏名・警備員番号で検索</label>
         <input id="guardManagementSearch" type="search" placeholder="例：山田 太郎、012345">
@@ -349,10 +374,9 @@
       <button id="closeMenuButton" class="secondary" type="button">閉じる</button>
       <button id="menuAdminButton" type="button">管理画面</button>
       <button id="menuShiftBuilderButton" type="button">シフト作成</button>
-      <button id="menuGuardManagementButton" type="button">警備員管理</button>
-      <button id="menuProxyInputButton" type="button">勤務希望の代理入力</button>
       <button id="menuCalendarButton" type="button">自分の勤務希望</button>
       <button id="menuOwnShiftsButton" type="button">自分のシフト</button>
+      <button id="menuDailyProgressButton" type="button">当日の勤務状況</button>
       <button id="menuRequestsButton" type="button">内勤者申請</button>
       <button id="menuLogoutButton" class="secondary" type="button">ログアウト</button>
     </nav>
@@ -394,6 +418,7 @@
             <span>分</span>
           </span>
         </label>
+        <label>出発確認時刻（任意）<input id="shiftDepartureCheckTime" type="time"></label>
         <label>必要人数（必須）
           <span class="number-picker-wrap">
             <input id="shiftRequiredMembers" type="number" min="1" max="99" placeholder="人数を入力" required>
@@ -425,6 +450,17 @@
     </div>
   </div>
 
+  <div id="shiftMembersModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shiftMembersTitle">
+    <div class="modal shift-members-modal">
+      <h2 id="shiftMembersTitle">隊員確認</h2>
+      <div id="shiftMembersSummary" class="shift-members-summary"></div>
+      <div id="shiftMembersList" class="shift-members-list"></div>
+      <div class="actions">
+        <button id="closeShiftMembersButton" class="secondary" type="button">閉じる</button>
+      </div>
+    </div>
+  </div>
+
   <div id="managedGuardModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="managedGuardModalTitle">
     <div class="modal guard-editor">
       <h2 id="managedGuardModalTitle">新しい警備員を登録</h2>
@@ -436,6 +472,9 @@
         </label>
         <label>氏名
           <input id="managedGuardName" type="text" maxlength="80">
+        </label>
+        <label>電話番号
+          <input id="managedGuardPhone" type="tel" inputmode="tel" maxlength="20">
         </label>
         <label>郵便番号（7桁）
           <input id="managedGuardPostalCode" type="text" inputmode="numeric" maxlength="8">
@@ -455,17 +494,41 @@
         <label>最寄り駅
           <input id="managedGuardNearestStation" type="text" maxlength="80">
         </label>
-        <label class="full">連絡用メールアドレス（任意）
+        <label id="managedGuardContactEmailLabel" class="full">連絡用メールアドレス（任意）
           <input id="managedGuardContactEmail" type="email" maxlength="254">
         </label>
       </div>
       <div class="managed-fixed-values">
         <strong>固定設定</strong>
-        <span>利用方法：代理入力</span><span>区分：警備員</span><span>状態：active</span>
+        <span id="managedGuardFixedInputMode">利用方法：代理入力</span>
+        <span id="managedGuardFixedRole">区分：警備員</span>
+        <span id="managedGuardFixedStatus">状態：active</span>
       </div>
       <div class="actions">
         <button id="saveManagedGuardButton" type="button">保存する</button>
         <button id="cancelManagedGuardButton" class="secondary" type="button">変更せず閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="webProfileEditConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="webProfileEditConfirmTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="webProfileEditConfirmTitle">Web利用者の情報を編集します</h2>
+      <div id="webProfileEditConfirmMessage" class="operation-confirm-message"></div>
+      <div class="actions">
+        <button id="cancelWebProfileEditButton" class="secondary" type="button">キャンセル</button>
+        <button id="confirmWebProfileEditButton" type="button">編集する</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="profileSaveConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="profileSaveConfirmTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="profileSaveConfirmTitle">プロフィール情報を更新しますか？</h2>
+      <div id="profileSaveConfirmMessage" class="operation-confirm-message"></div>
+      <div class="actions">
+        <button id="cancelProfileSaveButton" class="secondary" type="button">戻る</button>
+        <button id="confirmProfileSaveButton" type="button">更新する</button>
       </div>
     </div>
   </div>
@@ -477,6 +540,66 @@
       <div class="actions">
         <button id="confirmAccountStatusButton" class="danger" type="button">利用停止にする</button>
         <button id="cancelAccountStatusButton" class="secondary" type="button">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="webProxyConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="webProxyConfirmTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="webProxyConfirmTitle">Web利用者の勤務希望を変更します</h2>
+      <div id="webProxyConfirmMessage" class="operation-confirm-message"></div>
+      <div class="actions">
+        <button id="cancelWebProxyButton" class="secondary" type="button">キャンセル</button>
+        <button id="startWebProxyButton" type="button">代理入力を開始</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="proxyReasonModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="proxyReasonTitle">
+    <div class="modal compact-action-modal">
+      <div id="proxyReasonStep">
+        <h2 id="proxyReasonTitle">変更理由を選択してください</h2>
+        <p class="large-help">代理入力の記録として、変更理由は必須です。</p>
+        <label for="proxyUpdateReason">変更理由
+          <select id="proxyUpdateReason">
+            <option value="">選択してください</option>
+            <option value="phone_request">本人から電話で依頼</option>
+            <option value="in_person_request">本人から対面で依頼</option>
+            <option value="paper_transfer">紙の勤務希望表を転記</option>
+            <option value="staff_correction">内勤者による入力内容の訂正</option>
+            <option value="other">その他</option>
+          </select>
+        </label>
+        <label id="proxyUpdateReasonNoteWrap" for="proxyUpdateReasonNote" hidden>理由の詳細（200文字以内）
+          <textarea id="proxyUpdateReasonNote" maxlength="200"></textarea>
+        </label>
+        <div id="proxyReasonMessage" class="message" role="alert"></div>
+        <div class="actions">
+          <button id="cancelProxyReasonButton" class="secondary" type="button">キャンセル</button>
+          <button id="continueProxyReasonButton" type="button">確認へ進む</button>
+        </div>
+      </div>
+      <div id="proxyConfirmStep" hidden>
+        <h2>勤務希望を代理入力として保存します</h2>
+        <div id="proxySaveConfirmation" class="operation-confirm-message"></div>
+        <div class="actions">
+          <button id="backProxyReasonButton" class="secondary" type="button">戻る</button>
+          <button id="confirmProxySaveButton" type="button">保存する</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="departureTimeModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="departureTimeTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="departureTimeTitle">出発時間を入力してください</h2>
+      <label for="departureTimeInput">出発時間
+        <input id="departureTimeInput" type="time" required>
+      </label>
+      <div id="departureTimeMessage" class="message" role="alert"></div>
+      <div class="actions">
+        <button id="cancelDepartureTimeButton" class="secondary" type="button">キャンセル</button>
+        <button id="confirmDepartureTimeButton" type="button">出発確認</button>
       </div>
     </div>
   </div>
@@ -515,6 +638,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260730-2"></script>
+  <script type="module" src="./js/app.js?v=20260730-7"></script>
 </body>
 </html>

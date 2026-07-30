@@ -37,7 +37,12 @@ export async function saveAvailability(uid, date, values, branchId = "kokubunji"
     undecided: Boolean(values.undecided),
     note: String(values.note || "").trim().slice(0, 500),
     updatedByUid: audit.updatedByUid || uid,
-    updatedByType: audit.updatedByType === "staff" ? "staff" : "self",
+    updatedByType: audit.updatedByType === "proxy" ? "proxy" : "self",
+    updatedByRole: audit.updatedByType === "proxy" ? String(audit.updatedByRole || "") : "",
+    updateReason: audit.updatedByType === "proxy" ? String(audit.updateReason || "") : "",
+    updateReasonNote: audit.updatedByType === "proxy"
+      ? String(audit.updateReasonNote || "").trim().slice(0, 200)
+      : "",
     updatedAfterDeadline: Boolean(audit.updatedAfterDeadline),
     createdAt: previous?.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()

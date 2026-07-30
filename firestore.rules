@@ -23,7 +23,8 @@ service cloud.firestore {
       return data.keys().hasAll(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
         'addressLine','building','nearestStation','branchId','createdAt','updatedAt'])
         && data.keys().hasOnly(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
-        'addressLine','building','nearestStation','branchId','inputMode','authUid','createdBy','createdAt','updatedAt'])
+        'addressLine','building','nearestStation','phone','branchId','inputMode','authUid','createdBy',
+        'updatedByUid','createdAt','updatedAt'])
         && data.employeeNumber is string && data.employeeNumber.matches('^[0-9]{6}$')
         && validText(data.name,1,80)
         && (data.contactEmail == '' || validEmail(data.contactEmail))
@@ -31,9 +32,11 @@ service cloud.firestore {
         && validText(data.prefecture,1,20) && validText(data.city,1,80)
         && validText(data.addressLine,1,160) && validText(data.building,0,160)
         && validText(data.nearestStation,0,80) && validText(data.branchId,1,40)
+        && (!('phone' in data) || validText(data.phone,0,20))
         && (!('inputMode' in data) || data.inputMode in ['web','managed'])
         && (!('authUid' in data) || data.authUid == null || validText(data.authUid,1,128))
         && (!('createdBy' in data) || validText(data.createdBy,1,128))
+        && (!('updatedByUid' in data) || validText(data.updatedByUid,1,128))
         && data.createdAt is timestamp && data.updatedAt is timestamp;
     }
     function isValidManagedUser(data) {
@@ -105,28 +108,46 @@ service cloud.firestore {
       return data.keys().hasAll(['uid','branchId','date','day','night','unavailable','undecided','note',
           'updatedByUid','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
         && data.keys().hasOnly(['uid','branchId','date','day','night','unavailable','undecided','note',
-          'updatedByUid','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
+          'updatedByUid','updatedByType','updatedByRole','updateReason','updateReasonNote',
+          'updatedAfterDeadline','createdAt','updatedAt'])
         && data.branchId == myRole().branchId
         && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && id == data.date + '_' + data.uid && data.day is bool && data.night is bool
         && data.unavailable is bool && data.undecided is bool && validChoice(data)
         && validText(data.note,0,500)
-        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','staff']
+        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','proxy']
+        && (!('updatedByRole' in data) || validText(data.updatedByRole,0,10))
+        && (!('updateReason' in data) || validText(data.updateReason,0,40))
+        && (!('updateReasonNote' in data) || validText(data.updateReasonNote,0,200))
         && data.updatedAfterDeadline is bool
         && data.createdAt is timestamp && data.updatedAt is timestamp;
     }
     function isSelfAvailability(data) {
       return data.uid == request.auth.uid
         && data.updatedByUid == request.auth.uid && data.updatedByType == 'self'
+        && (!('updatedByRole' in data) || data.updatedByRole == '')
+        && (!('updateReason' in data) || data.updateReason == '')
+        && (!('updateReasonNote' in data) || data.updateReasonNote == '')
         && data.updatedAfterDeadline == false;
+    }
+    function hasValidProxyAudit(data) {
+      return data.updatedByType == 'proxy'
+        && data.updatedByRole == myRole().role
+        && data.updatedByRole in ['staff','admin']
+        && data.updateReason in ['phone_request','in_person_request','paper_transfer','staff_correction','other']
+        && ((data.updateReason == 'other' && validText(data.updateReasonNote,1,200))
+          || (data.updateReason != 'other' && data.updateReasonNote == ''));
     }
     function isManagedAvailability(data) {
       return isOffice() && data.uid != request.auth.uid
-        && data.updatedByUid == request.auth.uid && data.updatedByType == 'staff'
+        && data.updatedByUid == request.auth.uid
         && get(/databases/$(database)/documents/users/$(data.uid)).data.branchId == myRole().branchId
-        && get(/databases/$(database)/documents/users/$(data.uid)).data.inputMode == 'managed'
         && get(rolePath(data.uid)).data.branchId == myRole().branchId
-        && get(rolePath(data.uid)).data.accountStatus == 'active';
+        && get(rolePath(data.uid)).data.accountStatus == 'active'
+        && hasValidProxyAudit(data)
+        && (get(/databases/$(database)/documents/users/$(data.uid)).data.inputMode in ['managed','web']
+          || !('inputMode' in get(/databases/$(database)/documents/users/$(data.uid)).data))
+        && (isAdmin() || get(rolePath(data.uid)).data.role != 'admin');
     }
     function isValidRequest(data,uid) {
       return data.keys().hasAll(['uid','employeeNumber','name','branchId','status','createdAt','updatedAt'])
@@ -142,7 +163,7 @@ service cloud.firestore {
       return data.keys().hasAll(['date','shiftType','branchId','title','clientName','address','meetingPlace',
         'meetingTime','startTime','endTime','leaderUid','memberUids','requiredMembers','status','createdBy','createdAt','updatedAt'])
       && data.keys().hasOnly(['date','shiftType','branchId','title','clientName','address','meetingPlace',
-        'meetingTime','startTime','endTime','note','leaderUid','memberUids','requiredMembers','status','createdBy','createdAt','updatedAt'])
+        'meetingTime','startTime','endTime','departureCheckTime','note','leaderUid','memberUids','requiredMembers','status','createdBy','createdAt','updatedAt'])
         && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.shiftType in ['day','night'] && validText(data.branchId,1,40)
         && validText(data.title,0,80) && validText(data.clientName,0,80)
@@ -150,6 +171,8 @@ service cloud.firestore {
         && data.meetingTime is string && (data.meetingTime == '' || data.meetingTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
         && data.startTime is string && (data.startTime == '' || data.startTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
         && data.endTime is string && (data.endTime == '' || data.endTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        && (!('departureCheckTime' in data) || (data.departureCheckTime is string
+          && (data.departureCheckTime == '' || data.departureCheckTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))))
         && (!('note' in data) || validText(data.note,0,500))
         && (data.leaderUid == null || validText(data.leaderUid,1,128))
         && data.memberUids is list && data.memberUids.size() <= 99
@@ -162,6 +185,74 @@ service cloud.firestore {
           || (get(rolePath(data.leaderUid)).data.accountStatus == 'active'
             && get(rolePath(data.leaderUid)).data.branchId == data.branchId))
         && data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+    function shiftPath(shiftId) {
+      return /databases/$(database)/documents/shiftGroups/$(shiftId);
+    }
+    function isValidShiftMemberProfile(data, shiftId, workerId) {
+      return data.keys().hasAll(['workerId','name','employeeNumber','nearestStation','branchId','updatedAt'])
+        && data.keys().hasOnly(['workerId','name','employeeNumber','nearestStation','branchId','updatedAt'])
+        && data.workerId == workerId
+        && validText(data.name,1,80)
+        && data.employeeNumber is string && data.employeeNumber.matches('^[0-9]{6}$')
+        && validText(data.nearestStation,0,80)
+        && validText(data.branchId,1,40)
+        && data.updatedAt is timestamp
+        && data.name == get(/databases/$(database)/documents/users/$(workerId)).data.name
+        && data.employeeNumber == get(/databases/$(database)/documents/users/$(workerId)).data.employeeNumber
+        && data.nearestStation == get(/databases/$(database)/documents/users/$(workerId)).data.nearestStation
+        && data.branchId == get(/databases/$(database)/documents/users/$(workerId)).data.branchId
+        && data.branchId == getAfter(shiftPath(shiftId)).data.branchId
+        && workerId in getAfter(shiftPath(shiftId)).data.memberUids;
+    }
+    function isValidProgress(data, shiftId, workerId) {
+      return data.keys().hasAll(['shiftGroupId','workerId','branchId','date','shiftType',
+          'createdAt','updatedAt','updatedByUid','updatedByType'])
+        && data.keys().hasOnly(['shiftGroupId','workerId','branchId','date','shiftType',
+          'departureAcknowledgedAt','departureTime','departedAt','arrivedAt',
+          'createdAt','updatedAt','updatedByUid','updatedByType'])
+        && data.shiftGroupId == shiftId && data.workerId == workerId
+        && validText(data.shiftGroupId,1,128) && validText(data.workerId,1,128)
+        && validText(data.branchId,1,40)
+        && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.shiftType in ['day','night']
+        && (!('departureAcknowledgedAt' in data) || data.departureAcknowledgedAt is timestamp)
+        && (!('departureTime' in data) || (data.departureTime is string
+          && data.departureTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')))
+        && (!('departedAt' in data) || data.departedAt is timestamp)
+        && (!('arrivedAt' in data) || data.arrivedAt is timestamp)
+        && data.createdAt is timestamp && data.updatedAt is timestamp
+        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','staff'];
+    }
+    function progressMatchesShift(data) {
+      return get(shiftPath(data.shiftGroupId)).data.status == 'confirmed'
+        && data.branchId == get(shiftPath(data.shiftGroupId)).data.branchId
+        && data.date == get(shiftPath(data.shiftGroupId)).data.date
+        && data.shiftType == get(shiftPath(data.shiftGroupId)).data.shiftType
+        && data.workerId in get(shiftPath(data.shiftGroupId)).data.memberUids;
+    }
+    function departureTimePresentForNewAcknowledgement() {
+      return !('departureAcknowledgedAt' in request.resource.data)
+        || ('departureTime' in request.resource.data);
+    }
+    function departureTimePresentForUpdatedAcknowledgement() {
+      return ('departureAcknowledgedAt' in resource.data)
+        || !('departureAcknowledgedAt' in request.resource.data)
+        || ('departureTime' in request.resource.data);
+    }
+    function selfProgressTimestampsValid() {
+      return (!('departureAcknowledgedAt' in request.resource.data)
+          || request.resource.data.departureAcknowledgedAt == request.time
+          || (('departureAcknowledgedAt' in resource.data)
+            && request.resource.data.departureAcknowledgedAt == resource.data.departureAcknowledgedAt))
+        && (!('departureTime' in resource.data)
+          || request.resource.data.departureTime == resource.data.departureTime)
+        && (!('departedAt' in request.resource.data)
+          || request.resource.data.departedAt == request.time
+          || (('departedAt' in resource.data) && request.resource.data.departedAt == resource.data.departedAt))
+        && (!('arrivedAt' in request.resource.data)
+          || request.resource.data.arrivedAt == request.time
+          || (('arrivedAt' in resource.data) && request.resource.data.arrivedAt == resource.data.arrivedAt));
     }
 
     match /employeeNumbers/{number} {
@@ -206,15 +297,20 @@ service cloud.firestore {
         && (
           (isActive() && isOwner(uid)
             && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['employeeNumber','branchId','inputMode','authUid','createdBy','createdAt']))
+              .hasAny(['employeeNumber','branchId','inputMode','authUid','createdBy','updatedByUid','createdAt']))
           || (isOffice()
+            && uid != request.auth.uid
             && resource.data.branchId == myRole().branchId
-            && resource.data.inputMode == 'managed' && resource.data.authUid == null
-            && request.resource.data.inputMode == 'managed' && request.resource.data.authUid == null
+            && get(rolePath(uid)).data.branchId == myRole().branchId
+            && get(rolePath(uid)).data.accountStatus == 'active'
+            && (isAdmin() || get(rolePath(uid)).data.role != 'admin')
+            && request.resource.data.updatedByUid == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'name','postalCode','prefecture','city','addressLine','building',
-              'nearestStation','contactEmail','updatedAt'
-            ]))
+              'name','phone','postalCode','prefecture','city','addressLine','building',
+              'nearestStation','contactEmail','updatedByUid','updatedAt'
+            ])
+            && (resource.data.inputMode == 'managed'
+              || request.resource.data.contactEmail == resource.data.contactEmail))
         );
       allow delete: if false;
     }
@@ -290,6 +386,71 @@ service cloud.firestore {
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time;
       allow delete: if isOffice() && resource.data.branchId == myRole().branchId;
+    }
+    match /shiftMemberProfiles/{shiftId}/members/{workerId} {
+      allow read: if isActive() && (
+        (isOffice() && resource.data.branchId == myRole().branchId)
+        || (get(shiftPath(shiftId)).data.status == 'confirmed'
+          && get(shiftPath(shiftId)).data.branchId == myRole().branchId
+          && get(shiftPath(shiftId)).data.leaderUid == request.auth.uid
+          && workerId in get(shiftPath(shiftId)).data.memberUids)
+      );
+      allow create, update: if isOffice()
+        && getAfter(shiftPath(shiftId)).data.branchId == myRole().branchId
+        && isValidShiftMemberProfile(request.resource.data,shiftId,workerId)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isOffice() && resource.data.branchId == myRole().branchId;
+    }
+    match /shiftProgress/{shiftId}/workers/{workerId} {
+      allow read: if isActive() && (
+        (workerId == request.auth.uid
+          && get(shiftPath(shiftId)).data.status == 'confirmed'
+          && get(shiftPath(shiftId)).data.branchId == myRole().branchId
+          && workerId in get(shiftPath(shiftId)).data.memberUids)
+        || (isOffice() && get(shiftPath(shiftId)).data.branchId == myRole().branchId)
+        || (get(shiftPath(shiftId)).data.status == 'confirmed'
+          && get(shiftPath(shiftId)).data.branchId == myRole().branchId
+          && get(shiftPath(shiftId)).data.leaderUid == request.auth.uid
+          && workerId in get(shiftPath(shiftId)).data.memberUids)
+      );
+      allow create: if isActive() && isValidProgress(request.resource.data,shiftId,workerId)
+        && progressMatchesShift(request.resource.data)
+        && departureTimePresentForNewAcknowledgement()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          (request.resource.data.workerId == request.auth.uid
+            && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByType == 'self'
+            && selfProgressTimestampsValid())
+          || (isOffice() && request.resource.data.branchId == myRole().branchId
+            && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByType == 'staff')
+        );
+      allow update: if isActive() && isValidProgress(request.resource.data,shiftId,workerId)
+        && progressMatchesShift(request.resource.data)
+        && departureTimePresentForUpdatedAcknowledgement()
+        && request.resource.data.shiftGroupId == resource.data.shiftGroupId
+        && request.resource.data.workerId == resource.data.workerId
+        && request.resource.data.branchId == resource.data.branchId
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.shiftType == resource.data.shiftType
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && (
+          (resource.data.workerId == request.auth.uid
+            && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByType == 'self'
+            && selfProgressTimestampsValid()
+            && (!('departureAcknowledgedAt' in resource.data)
+              || request.resource.data.departureAcknowledgedAt == resource.data.departureAcknowledgedAt)
+            && (!('departedAt' in resource.data) || request.resource.data.departedAt == resource.data.departedAt)
+            && (!('arrivedAt' in resource.data) || request.resource.data.arrivedAt == resource.data.arrivedAt))
+          || (isOffice() && resource.data.branchId == myRole().branchId
+            && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByType == 'staff')
+        );
+      allow delete: if false;
     }
     match /{document=**} { allow read, write: if false; }
   }

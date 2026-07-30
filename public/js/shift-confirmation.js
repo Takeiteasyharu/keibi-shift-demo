@@ -1,10 +1,14 @@
 import { db } from "./firebase-config.js";
 import {
   collection,
+  doc,
+  getDoc,
   onSnapshot,
   query,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { createMapAddressLink, createMapButton } from "./map-link.js";
+import { createSelfProgressSection } from "./shift-progress.js";
 
 let el;
 let navigate;
@@ -16,11 +20,17 @@ export function initShiftConfirmation(elements, showScreen) {
   el = elements;
   navigate = showScreen;
   el.closeOwnShiftDetailButton.addEventListener("click", closeDetail);
+  el.closeShiftMembersButton.addEventListener("click", closeMembers);
   el.ownShiftDetailModal.addEventListener("click", event => {
     if (event.target === el.ownShiftDetailModal) closeDetail();
   });
+  el.shiftMembersModal.addEventListener("click", event => {
+    if (event.target === el.shiftMembersModal) closeMembers();
+  });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && el.ownShiftDetailModal.classList.contains("show")) closeDetail();
+    if (event.key !== "Escape") return;
+    if (el.shiftMembersModal.classList.contains("show")) closeMembers();
+    else if (el.ownShiftDetailModal.classList.contains("show")) closeDetail();
   });
 }
 
@@ -37,6 +47,7 @@ export function showOwnShifts(profile) {
     where("memberUids", "array-contains", profile.uid)
   );
   unsubscribe = onSnapshot(ownQuery, snapshot => {
+    closeMembers();
     const today = toDateKey(new Date());
     shifts = snapshot.docs
       .map(item => ({ id: item.id, ...item.data() }))
@@ -81,8 +92,10 @@ function render() {
     title.textContent = valueOrUnset(shift.title);
     const summary = document.createElement("div");
     summary.className = "own-shift-summary";
+    const summaryAddress = detailLine("現場", "");
+    summaryAddress.lastChild.replaceWith(createMapAddressLink(shift.address));
     summary.append(
-      detailLine("現場", shift.address, "shift-address-value"),
+      summaryAddress,
       detailLine("勤務開始", shift.startTime),
       detailLine("役割", roleLabel(shift))
     );
@@ -90,17 +103,29 @@ function render() {
     button.type = "button";
     button.textContent = "詳細を見る";
     button.addEventListener("click", () => openDetail(shift));
-    card.append(heading, title, summary, button);
+    const mapButton = createMapButton(shift.address);
+    card.append(heading, title, summary, mapButton, button);
+    if (shift.leaderUid === currentProfile.uid) {
+      const membersButton = document.createElement("button");
+      membersButton.type = "button";
+      membersButton.className = "leader-members-button";
+      membersButton.textContent = "隊員を確認";
+      membersButton.addEventListener("click", () => openMembers(shift));
+      card.appendChild(membersButton);
+    }
     el.ownShiftsList.appendChild(card);
   });
 }
 
-function openDetail(shift) {
+async function openDetail(shift) {
   el.ownShiftDetailTitle.textContent = `${formatDate(shift.date)} ${shift.shiftType === "night" ? "夜勤" : "日勤"}`;
+  const addressRow = detailLine("現場", "");
+  addressRow.lastChild.replaceWith(createMapAddressLink(shift.address));
+  addressRow.appendChild(createMapButton(shift.address));
   el.ownShiftDetailBody.replaceChildren(
     detailLine("グループタイトル", shift.title),
     detailLine("得意先", shift.clientName),
-    detailLine("現場", shift.address, "shift-address-value"),
+    addressRow,
     detailLine("集合場所", shift.meetingPlace),
     detailLine("集合時刻", shift.meetingTime),
     detailLine("勤務予定", timeRange(shift)),
@@ -108,12 +133,64 @@ function openDetail(shift) {
     detailLine("備考", shift.note),
     detailLine("最終更新", formatTimestamp(shift.updatedAt))
   );
+  if (shift.leaderUid === currentProfile.uid) {
+    const membersButton = document.createElement("button");
+    membersButton.type = "button";
+    membersButton.className = "leader-members-button";
+    membersButton.textContent = "隊員を確認";
+    membersButton.addEventListener("click", () => openMembers(shift));
+    el.ownShiftDetailBody.appendChild(membersButton);
+  }
+  el.ownShiftDetailBody.appendChild(await createSelfProgressSection(shift, currentProfile));
   el.ownShiftDetailModal.classList.add("show");
   requestAnimationFrame(() => el.closeOwnShiftDetailButton.focus());
 }
 
 function closeDetail() {
   el.ownShiftDetailModal.classList.remove("show");
+}
+
+async function openMembers(shift) {
+  if (shift.status !== "confirmed" || shift.leaderUid !== currentProfile.uid) return;
+  el.shiftMembersTitle.textContent = `${formatDate(shift.date)} ${shift.shiftType === "night" ? "夜勤" : "日勤"}`;
+  el.shiftMembersSummary.textContent =
+    `${valueOrUnset(shift.title)}\n配置人数：${shift.memberUids.length}名\n隊長：1名\n隊員：${Math.max(0, shift.memberUids.length - 1)}名`;
+  el.shiftMembersList.innerHTML = '<div class="panel">隊員情報を読み込んでいます。</div>';
+  el.shiftMembersModal.classList.add("show");
+  try {
+    const snapshots = await Promise.all(shift.memberUids.map(async uid => ({
+      profile: await getDoc(doc(db, "shiftMemberProfiles", shift.id, "members", uid)),
+      progress: await getDoc(doc(db, "shiftProgress", shift.id, "workers", uid))
+    })));
+    el.shiftMembersList.replaceChildren();
+    snapshots.forEach(item => {
+      if (!item.profile.exists()) return;
+      const member = item.profile.data();
+      const progress = item.progress.data() || {};
+      const card = document.createElement("article");
+      card.className = "shift-member-card";
+      const name = document.createElement("h3");
+      name.textContent = member.name || "氏名未設定";
+      const role = document.createElement("strong");
+      role.className = member.workerId === shift.leaderUid ? "member-role leader" : "member-role";
+      role.textContent = member.workerId === shift.leaderUid ? "隊長" : "隊員";
+      const details = document.createElement("div");
+      details.textContent = `警備員番号：${member.employeeNumber || "未設定"}\n最寄り駅：${member.nearestStation || "未設定"}\n` +
+        `進捗：${progress.arrivedAt ? "到着済" : progress.departedAt ? "出発済" : "未出発"}`;
+      card.append(name, role, details);
+      el.shiftMembersList.appendChild(card);
+    });
+    if (!el.shiftMembersList.childElementCount) {
+      el.shiftMembersList.innerHTML = '<div class="panel">隊員情報がまだ準備されていません。内勤者へお問い合わせください。</div>';
+    }
+  } catch (error) {
+    console.error(error);
+    el.shiftMembersList.innerHTML = '<div class="message show error">隊員情報を確認できませんでした。シフトが変更された可能性があります。</div>';
+  }
+}
+
+function closeMembers() {
+  el.shiftMembersModal.classList.remove("show");
 }
 
 function detailLine(label, value, valueClass = "") {

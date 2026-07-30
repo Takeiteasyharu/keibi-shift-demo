@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
 let el;
 let currentRole;
@@ -16,6 +16,7 @@ let pendingDateAction = null;
 let confirmationResolve = null;
 let notifyUser = () => {};
 const recentlyDuplicatedIds = new Set();
+let memberProfilesBackfilled = false;
 
 export async function loadOwnConfirmedShifts(uid, branchId) {
   const base = collection(db, "shiftGroups");
@@ -118,6 +119,10 @@ export function initShifts(elements, showScreen, notify) {
     currentProfile = profile;
     currentRole = role;
     showScreen("shiftBuilder");
+    if (!memberProfilesBackfilled) {
+      await backfillConfirmedMemberProfiles();
+      memberProfilesBackfilled = true;
+    }
     await renderGroups();
   };
 }
@@ -453,6 +458,7 @@ async function openEditor(group = null) {
   const [startHour, startMinute] = normalizeStartTime(normalized?.startTime, defaultHour);
   el.shiftStartHour.value = startHour;
   el.shiftStartMinute.value = startMinute;
+  el.shiftDepartureCheckTime.value = normalized?.departureCheckTime || "";
   closeRequiredMembersOptions();
   el.memberSearch.value = "";
   el.showOutsideAvailability.checked = false;
@@ -630,6 +636,7 @@ function currentFormData(status = "draft") {
     meetingPlace: "",
     meetingTime: "",
     startTime: `${el.shiftStartHour.value}:${el.shiftStartMinute.value}`,
+    departureCheckTime: el.shiftDepartureCheckTime.value,
     endTime: "",
     note: el.shiftGroupNote.value.trim(),
     leaderUid: selectedLeader,
@@ -692,19 +699,86 @@ async function saveGroup(status, notify) {
   if (status === "confirmed" && !issues.length &&
       !confirm(`${data.date} ${data.shiftType === "day" ? "日勤" : "夜勤"}\n${data.title}\n${data.memberUids.length}名で確定しますか？`)) return;
 
-  if (editingId) {
-    await updateDoc(doc(db, "shiftGroups", editingId), { ...data, updatedAt: serverTimestamp() });
-  } else {
-    await addDoc(collection(db, "shiftGroups"), {
-      ...data,
-      createdBy: currentProfile.uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-  }
+  const shiftRef = editingId ? doc(db, "shiftGroups", editingId) : doc(collection(db, "shiftGroups"));
+  const batch = writeBatch(db);
+  if (editingId) batch.update(shiftRef, { ...data, updatedAt: serverTimestamp() });
+  else batch.set(shiftRef, {
+    ...data,
+    createdBy: currentProfile.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  await batch.commit();
+  await syncShiftMemberProfiles(shiftRef.id, data, status);
   closeEditor();
   notify(status === "confirmed" ? "シフトを確定しました。" : "下書きを保存しました。");
   await renderGroups();
+}
+
+async function syncShiftMemberProfiles(shiftId, data, status) {
+  const membersCollection = collection(db, "shiftMemberProfiles", shiftId, "members");
+  const existing = await getDocs(query(membersCollection, where("branchId", "==", data.branchId)));
+  const operations = existing.docs.map(item => ({ type: "delete", ref: item.ref }));
+  if (status === "confirmed") {
+    const byUid = new Map(candidates.map(person => [person.uid, person]));
+    data.memberUids.forEach(uid => {
+      const person = byUid.get(uid);
+      if (!person) return;
+      operations.push({
+        type: "set",
+        ref: doc(membersCollection, uid),
+        data: {
+          workerId: uid,
+          name: String(person.name || "").slice(0, 80),
+          employeeNumber: String(person.employeeNumber || ""),
+          nearestStation: String(person.nearestStation || "").slice(0, 80),
+          branchId: data.branchId,
+          updatedAt: serverTimestamp()
+        }
+      });
+    });
+  }
+  for (let index = 0; index < operations.length; index += 8) {
+    const profileBatch = writeBatch(db);
+    operations.slice(index, index + 8).forEach(operation => {
+      if (operation.type === "delete") profileBatch.delete(operation.ref);
+      else profileBatch.set(operation.ref, operation.data);
+    });
+    await profileBatch.commit();
+  }
+}
+
+async function backfillConfirmedMemberProfiles() {
+  const branchId = currentRole.branchId;
+  const [shiftSnapshot, usersSnapshot] = await Promise.all([
+    getDocs(query(collection(db, "shiftGroups"), where("branchId", "==", branchId), where("status", "==", "confirmed"))),
+    getDocs(query(collection(db, "users"), where("branchId", "==", branchId)))
+  ]);
+  const users = new Map(usersSnapshot.docs.map(item => [item.id, { uid: item.id, ...item.data() }]));
+  for (const shiftDocument of shiftSnapshot.docs) {
+    const shift = normalizeGroup(shiftDocument.data());
+    const existing = await getDocs(query(
+      collection(db, "shiftMemberProfiles", shiftDocument.id, "members"),
+      where("branchId", "==", branchId)
+    ));
+    const existingIds = new Set(existing.docs.map(item => item.id));
+    const missing = shift.memberUids.filter(uid => !existingIds.has(uid) && users.has(uid));
+    for (let index = 0; index < missing.length; index += 8) {
+      const batch = writeBatch(db);
+      missing.slice(index, index + 8).forEach(uid => {
+        const person = users.get(uid);
+        batch.set(doc(db, "shiftMemberProfiles", shiftDocument.id, "members", uid), {
+          workerId: uid,
+          name: String(person.name || "").slice(0, 80),
+          employeeNumber: String(person.employeeNumber || ""),
+          nearestStation: String(person.nearestStation || "").slice(0, 80),
+          branchId,
+          updatedAt: serverTimestamp()
+        });
+      });
+      await batch.commit();
+    }
+  }
 }
 
 function normalizeGroup(group) {
@@ -720,6 +794,7 @@ function normalizeGroup(group) {
     meetingPlace: group.meetingPlace || "",
     meetingTime: group.meetingTime || "",
     startTime: group.startTime || "",
+    departureCheckTime: group.departureCheckTime || "",
     endTime: group.endTime || "",
     note: group.note || "",
     leaderUid: group.leaderUid || null,
