@@ -38,6 +38,20 @@ export async function showAdmin(profile = currentProfile, roleData = currentRole
   await renderAdmin();
 }
 
+export function removeInactiveAccountFromAdmin(worker, accountStatus) {
+  if (!worker || isOperationalAccount(accountStatus)) return;
+  const accountId = worker.uid || worker.id;
+  if (!accountId) return;
+  [el.adminTableBody, el.adminCards].forEach(container => {
+    container.querySelectorAll("[data-account-id]").forEach(item => {
+      if (item.dataset.accountId === accountId) item.remove();
+    });
+  });
+  if (!el.adminTableBody.children.length) {
+    el.adminTableBody.innerHTML = '<tr><td colspan="5">該当する利用者はいません</td></tr>';
+  }
+}
+
 async function renderAdmin() {
   const branchId = effectiveBranchId(currentRole);
   const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
@@ -172,6 +186,9 @@ function resolveFormalBranchId(user, roleData) {
 
 function isVisibleAccount(user) {
   if (!isOperationalAccount(user.accountStatus)) return false;
+  // 旧users側に停止状態が残るデータは、通常一覧へ戻さない。
+  if (user.profileAccountStatus != null && !isOperationalAccount(user.profileAccountStatus)) return false;
+  if (user.disabledAt || user.disabledByUid) return false;
   // managedはAuthenticationを持たない正式仕様。webで明示的にauthUidが空のデータだけを無効扱いにする。
   if (user.inputMode === "web" && Object.hasOwn(user, "authUid") && !user.authUid) return false;
   return ["guard", "staff", "admin"].includes(user.role);

@@ -34,8 +34,9 @@ export async function registerGuard(form) {
     uid: user.uid, accountStatus: "pending", requestedBranchId: form.requestedBranchId
   });
   batch.set(doc(db, "users", user.uid), {
-    employeeNumber: form.employeeNumber, name: form.name, contactEmail: "",
-    postalCode: "", prefecture: "", city: "", addressLine: "", building: "",
+    employeeNumber: form.employeeNumber, name: form.name, contactEmail: form.contactEmail,
+    postalCode: form.postalCode, prefecture: form.prefecture, city: form.city,
+    addressLine: form.addressLine, building: form.building, phone: form.phone,
     nearestStation: "", requestedBranchId: form.requestedBranchId,
     inputMode: "web", authUid: user.uid,
     createdAt: now, updatedAt: now

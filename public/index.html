@@ -41,16 +41,44 @@
       <div class="panel">
         <div class="form-grid">
           <div>
-            <label for="regGuardId">警備員番号</label>
-            <input id="regGuardId" type="text" inputmode="numeric" maxlength="6">
-          </div>
-          <div>
             <label for="regName">氏名</label>
             <input id="regName" type="text" autocomplete="name">
           </div>
           <div>
+            <label for="regGuardId">警備員番号</label>
+            <input id="regGuardId" type="text" inputmode="numeric" maxlength="6">
+          </div>
+          <div>
             <label for="regRequestedBranch">希望所属支社</label>
             <select id="regRequestedBranch"></select>
+          </div>
+          <div>
+            <label for="regZip">郵便番号（任意）</label>
+            <input id="regZip" type="text" inputmode="numeric" maxlength="8" autocomplete="postal-code" placeholder="例：1850012">
+          </div>
+          <div>
+            <label for="regPref">都道府県</label>
+            <input id="regPref" type="text" maxlength="20" autocomplete="address-level1">
+          </div>
+          <div>
+            <label for="regCity">市区町村</label>
+            <input id="regCity" type="text" maxlength="80" autocomplete="address-level2">
+          </div>
+          <div>
+            <label for="regStreet">町名・番地</label>
+            <input id="regStreet" type="text" maxlength="160" autocomplete="address-line1">
+          </div>
+          <div>
+            <label for="regBuilding">建物名・部屋番号（任意）</label>
+            <input id="regBuilding" type="text" maxlength="160" autocomplete="address-line2">
+          </div>
+          <div>
+            <label for="regPhone">電話番号</label>
+            <input id="regPhone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel" placeholder="例：090-1234-5678">
+          </div>
+          <div>
+            <label for="regEmail">メールアドレス（任意）</label>
+            <input id="regEmail" type="email" maxlength="254" autocomplete="email">
           </div>
           <div>
             <label for="regPassword">パスワード</label>
@@ -664,6 +692,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260801-9"></script>
+  <script type="module" src="./js/app.js?v=20260801-13"></script>
 </body>
 </html>

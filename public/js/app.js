@@ -1,9 +1,9 @@
-import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-1";
+import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-2";
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260801-1";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-2";
-import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-5";
+import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-8";
 import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260801-2";
-import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-2";
+import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-5";
 import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260801-1";
 import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260801-1";
 import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260801-2";
@@ -24,7 +24,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initAdmin(el, showScreen, createIntegratedWorkerMenu);
   initCalendar(el, showToast);
   showShiftBuilder = initShifts(el, showScreen, showToast);
-  initGuardManagement(el, showScreen, showToast, openProxyCalendar, () => showAdmin(profile, roleData));
+  initGuardManagement(el, showScreen, showToast, openProxyCalendar, async (worker, accountStatus) => {
+    removeInactiveAccountFromAdmin(worker, accountStatus);
+    await showAdmin(profile, roleData);
+  });
   initProxyInput(el, showScreen, openProxyCalendar);
   initShiftConfirmation(el, showScreen);
   initShiftProgress(el, showScreen, showToast);
@@ -39,7 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function cacheElements() {
   ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
-   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regPassword",
+   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regZip","regPref","regCity","regStreet","regBuilding","regPhone","regEmail","regPassword",
    "regPasswordConfirm","pendingLogoutButton","rejectedLogoutButton","rejectedAccountReason",
    "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
@@ -212,7 +215,12 @@ async function login() {
 async function register() {
   const form = {
     employeeNumber: el.regGuardId.value.trim(), name: el.regName.value.trim(),
-    requestedBranchId: el.regRequestedBranch.value, password: el.regPassword.value
+    requestedBranchId: el.regRequestedBranch.value,
+    postalCode: el.regZip.value.replace(/\D/g, ""),
+    prefecture: el.regPref.value.trim(), city: el.regCity.value.trim(),
+    addressLine: el.regStreet.value.trim(), building: el.regBuilding.value.trim(),
+    phone: el.regPhone.value.trim(), contactEmail: el.regEmail.value.trim().toLowerCase(),
+    password: el.regPassword.value
   };
   const errors = validateRegistration(form, el.regPasswordConfirm.value);
   if (errors.length) { showMessage(el.registerMessage, errors.join(" / "), true); return; }
@@ -237,6 +245,19 @@ function validateRegistration(form, confirmation) {
   if (!/^\d{6}$/.test(form.employeeNumber)) errors.push("警備員番号は6桁で入力してください");
   if (!form.name || form.name.length > 80) errors.push("氏名を80文字以内で入力してください");
   if (!["kokubunji", "mitaka"].includes(form.requestedBranchId)) errors.push("希望所属支社を選択してください");
+  if (form.postalCode && !/^\d{7}$/.test(form.postalCode)) errors.push("郵便番号は7桁で入力してください");
+  if (!form.prefecture || !form.city || !form.addressLine) errors.push("住所を入力してください");
+  if (form.prefecture.length > 20 || form.city.length > 80 || form.addressLine.length > 160 || form.building.length > 160) {
+    errors.push("住所が長すぎます");
+  }
+  const phoneDigits = form.phone.replace(/\D/g, "");
+  if (!form.phone) errors.push("電話番号を入力してください");
+  else if (!/^[0-9+\-() 　]+$/.test(form.phone) || phoneDigits.length < 9 || phoneDigits.length > 11) {
+    errors.push("電話番号の形式を確認してください");
+  }
+  if (form.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contactEmail)) {
+    errors.push("メールアドレスの形式を確認してください");
+  }
   if (form.password.length < 6) errors.push("パスワードは6文字以上で入力してください");
   if (form.password !== confirmation) errors.push("パスワードが一致していません");
   return errors;

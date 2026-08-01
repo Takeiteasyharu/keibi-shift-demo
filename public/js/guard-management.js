@@ -119,14 +119,18 @@ async function loadWorkers() {
       const data = item.data();
       const roleEntry = findRoleEntry(item.id, data, roles);
       const roleData = roleEntry?.data || {};
+      const disabledAt = roleData.disabledAt ?? data.disabledAt ?? null;
+      const disabledByUid = roleData.disabledByUid ?? data.disabledByUid ?? "";
+      const isInactive = roleData.accountStatus === "inactive" || data.accountStatus === "inactive" ||
+        Boolean(disabledAt || disabledByUid);
       return {
         ...data,
         id: item.id,
         uid: roleEntry?.id || data.authUid || data.uid || item.id,
         role: roleData.role || "guard",
-        accountStatus: roleData.accountStatus || null,
-        disabledAt: roleData.disabledAt || null,
-        disabledByUid: roleData.disabledByUid || "",
+        accountStatus: isInactive ? "inactive" : (roleData.accountStatus ?? data.accountStatus ?? null),
+        disabledAt,
+        disabledByUid,
         inputMode: data.inputMode === "managed" ? "managed" : "web"
       };
     }).sort((a, b) => String(a.employeeNumber).localeCompare(String(b.employeeNumber), "ja"));
@@ -412,27 +416,25 @@ async function applyAccountStatusAction() {
   try {
     const accountId = worker.uid || worker.id;
     const roleRef = doc(db, "userRoles", accountId);
-    const batch = writeBatch(db);
     const now = serverTimestamp();
+    const roleBatch = writeBatch(db);
     if (action === "disable") {
-      batch.update(roleRef, {
+      roleBatch.update(roleRef, {
         accountStatus: "inactive",
         disabledAt: now,
         disabledByUid: currentProfile.uid,
         updatedAt: now
       });
-      batch.set(doc(db, "shiftCandidateProfiles", accountId), candidateProfile(worker, accountId, "inactive", now));
-      await batch.commit();
+      await roleBatch.commit();
       notify(`${worker.name}さんを利用停止にしました。`);
     } else {
-      batch.update(roleRef, {
+      roleBatch.update(roleRef, {
         accountStatus: "active",
         disabledAt: deleteField(),
         disabledByUid: deleteField(),
         updatedAt: now
       });
-      batch.set(doc(db, "shiftCandidateProfiles", accountId), candidateProfile(worker, accountId, "active", now));
-      await batch.commit();
+      await roleBatch.commit();
       notify(`${worker.name}さんの利用を再開しました。`);
     }
     worker.accountStatus = nextStatus;
@@ -441,8 +443,10 @@ async function applyAccountStatusAction() {
     renderActiveWorkers();
     renderInactiveWorkers();
     closeAccountConfirm();
-    if (refreshIntegratedManagement) await refreshIntegratedManagement();
+    if (refreshIntegratedManagement) await refreshIntegratedManagement(worker, nextStatus);
     else await loadWorkers();
+    syncCandidateProfile(worker, nextStatus).catch(error =>
+      console.warn("シフト候補プロフィールの状態を同期できませんでした。", error));
   } catch (error) {
     console.error(error);
     const target = action === "restore" ? el.deletedAccountsMessage : el.guardManagementMessage;
@@ -454,6 +458,17 @@ async function applyAccountStatusAction() {
     el.confirmAccountStatusButton.disabled = false;
     el.confirmAccountStatusButton.textContent = buttonLabel;
   }
+}
+
+async function syncCandidateProfile(worker, accountStatus) {
+  const profileId = worker.id || worker.uid;
+  const accountId = worker.uid || worker.id;
+  // 旧データでusers文書IDとuserRoles文書IDが異なる場合は、Rules上同期できないためスキップする。
+  if (!profileId || profileId !== accountId) return;
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+  batch.set(doc(db, "shiftCandidateProfiles", profileId), candidateProfile(worker, profileId, accountStatus, now));
+  await batch.commit();
 }
 
 function candidateProfile(worker, accountId, accountStatus, updatedAt) {
