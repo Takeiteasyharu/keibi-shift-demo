@@ -37,7 +37,7 @@ export async function registerGuard(form) {
     employeeNumber: form.employeeNumber, name: form.name, contactEmail: form.contactEmail,
     postalCode: form.postalCode, prefecture: form.prefecture, city: form.city,
     addressLine: form.addressLine, building: form.building, phone: form.phone,
-    nearestStation: "", requestedBranchId: form.requestedBranchId,
+    nearestStation: form.nearestStation, requestedBranchId: form.requestedBranchId,
     inputMode: "web", authUid: user.uid,
     createdAt: now, updatedAt: now
   });
@@ -45,11 +45,18 @@ export async function registerGuard(form) {
     role: "guard", accountStatus: "pending", requestedBranchId: form.requestedBranchId,
     leaderEligible: false, createdAt: now, updatedAt: now
   });
+  if (form.staffRequested) {
+    batch.set(doc(db, "staffRequests", user.uid), {
+      uid: user.uid, employeeNumber: form.employeeNumber, name: form.name,
+      branchId: form.requestedBranchId, status: "pending", createdAt: now, updatedAt: now
+    });
+  }
   try {
     await batch.commit();
     return user;
   } catch (error) {
     await deleteUser(user).catch(() => undefined);
+    error.registrationStage = "firestoreReservation";
     throw error;
   }
 }

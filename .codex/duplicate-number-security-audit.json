@@ -1,0 +1,30 @@
+{
+  "score": 5,
+  "summary": "却下済み番号の再申請更新は、旧予約と旧roleのrejected状態、新Auth所有者、内部メール、バッチ後のusers/userRoles整合性をすべて要求する。active、inactive、pending、approved、状態不明の予約は奪取できない。",
+  "findings": [
+    {
+      "check": "Update Bypass",
+      "severity": "minor",
+      "issue": "成功する経路はresourceと旧roleがrejectedの場合だけで、更新後はpending固定。許可外状態への遷移は確認できなかった。",
+      "recommendation": "エミュレーターのルール単体テスト導入時にactive/inactive/pendingの拒否ケースを固定テスト化する。"
+    },
+    {
+      "check": "Authority Source",
+      "severity": "minor",
+      "issue": "新UIDはrequest.auth.uid、番号はAuth内部メール、旧状態は既存resourceと旧userRolesから取得しており、申請者入力だけを権限根拠にしていない。",
+      "recommendation": "現行条件を維持する。"
+    },
+    {
+      "check": "Business Logic vs. Rules",
+      "severity": "minor",
+      "issue": "却下済みは再申請でき、利用中・承認待ち・利用停止済みは拒否される。完全削除は予約不存在で既存create経路を使う。",
+      "recommendation": "完全削除時はAuth、users、userRoles、employeeNumbersを管理手順で一貫して整理する。"
+    },
+    {
+      "check": "Type Safety and Field Injection",
+      "severity": "minor",
+      "issue": "番号形式、支社値、状態値、許可キー、バッチ後の関連文書を検証している。",
+      "recommendation": "現行の厳格なキー制限を維持する。"
+    }
+  ]
+}

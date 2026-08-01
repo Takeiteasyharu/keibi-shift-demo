@@ -295,13 +295,29 @@ service cloud.firestore {
             && isSameBranch(getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.branchId)
             && getAfter(rolePath(request.resource.data.uid)).data.role == 'guard')
         );
-      allow update: if isAdmin()
-        && request.resource.data.uid == resource.data.uid
-        && request.resource.data.requestedBranchId == resource.data.requestedBranchId
-        && request.resource.data.accountStatus in ['approved','rejected']
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['accountStatus','branchId'])
-        && (request.resource.data.accountStatus == 'rejected'
-          || validBranchId(request.resource.data.branchId));
+      allow update: if (isAdmin()
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.requestedBranchId == resource.data.requestedBranchId
+          && request.resource.data.accountStatus in ['approved','rejected']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['accountStatus','branchId'])
+          && (request.resource.data.accountStatus == 'rejected'
+            || validBranchId(request.resource.data.branchId)))
+        || (resource.data.accountStatus == 'rejected'
+          && (!exists(rolePath(resource.data.uid))
+            || get(rolePath(resource.data.uid)).data.accountStatus == 'rejected')
+          && request.resource.data.keys().hasOnly(['uid','accountStatus','requestedBranchId','branchId'])
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['uid','accountStatus','requestedBranchId','branchId'])
+          && isOwner(request.resource.data.uid)
+          && request.auth.token.email == internalEmail(number)
+          && request.resource.data.accountStatus == 'pending'
+          && validBranchId(request.resource.data.requestedBranchId)
+          && !('branchId' in request.resource.data)
+          && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.employeeNumber == number
+          && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.authUid == request.resource.data.uid
+          && getAfter(rolePath(request.resource.data.uid)).data.role == 'guard'
+          && getAfter(rolePath(request.resource.data.uid)).data.accountStatus == 'pending'
+          && getAfter(rolePath(request.resource.data.uid)).data.requestedBranchId == request.resource.data.requestedBranchId);
       allow get, list, delete: if false;
     }
     match /branches/{branchId} {
@@ -414,6 +430,21 @@ service cloud.firestore {
             .hasOnly(['branchId','accountStatus','approvedByUid','approvedAt','updatedAt'])
           && getAfter(/databases/$(database)/documents/users/$(uid)).data.branchId == request.resource.data.branchId)
         || (isAdmin()
+          && resource.data.role == 'guard' && resource.data.accountStatus == 'pending'
+          && request.resource.data.role == 'staff'
+          && request.resource.data.accountStatus == 'approved'
+          && request.resource.data.requestedBranchId == resource.data.requestedBranchId
+          && validBranchId(request.resource.data.branchId)
+          && request.resource.data.branchId == getAfter(/databases/$(database)/documents/staffRequests/$(uid)).data.branchId
+          && get(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'pending'
+          && getAfter(/databases/$(database)/documents/staffRequests/$(uid)).data.status == 'approved'
+          && request.resource.data.approvedByUid == request.auth.uid
+          && request.resource.data.approvedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['role','branchId','accountStatus','approvedByUid','approvedAt','updatedAt'])
+          && getAfter(/databases/$(database)/documents/users/$(uid)).data.branchId == request.resource.data.branchId)
+        || (isAdmin()
           && resource.data.accountStatus == 'pending'
           && request.resource.data.accountStatus == 'rejected'
           && request.resource.data.role == 'guard'
@@ -458,7 +489,16 @@ service cloud.firestore {
     match /staffRequests/{uid} {
       allow create: if isOwner(uid) && isValidRequest(request.resource.data,uid)
         && request.resource.data.status == 'pending'
-        && request.resource.data.branchId == getAfter(rolePath(uid)).data.branchId
+        && getAfter(rolePath(uid)).data.role == 'guard'
+        && (
+          (getAfter(rolePath(uid)).data.accountStatus == 'pending'
+            && request.resource.data.branchId == getAfter(rolePath(uid)).data.requestedBranchId
+            && request.resource.data.employeeNumber == getAfter(/databases/$(database)/documents/users/$(uid)).data.employeeNumber
+            && request.resource.data.name == getAfter(/databases/$(database)/documents/users/$(uid)).data.name
+            && request.resource.data.branchId == getAfter(/databases/$(database)/documents/users/$(uid)).data.requestedBranchId)
+          || (isOperationalStatus(getAfter(rolePath(uid)).data.accountStatus)
+            && request.resource.data.branchId == getAfter(rolePath(uid)).data.branchId)
+        )
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow read: if isActive() && (isOwner(uid) || isAdmin()
         || (isStaff() && resource.data.branchId == myRole().branchId));

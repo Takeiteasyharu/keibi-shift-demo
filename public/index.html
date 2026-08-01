@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260801-2">
+  <link rel="stylesheet" href="./css/style.css?v=20260801-3">
 </head>
 <body>
   <main class="app">
@@ -52,6 +52,10 @@
             <label for="regRequestedBranch">希望所属支社</label>
             <select id="regRequestedBranch"></select>
           </div>
+          <div class="full">
+            <label class="checkbox-label"><input id="regStaffRequested" type="checkbox"> 内勤者用アカウントを希望する</label>
+            <p class="small-text">チェックした場合は、管理者の内勤者申請へ送られます。</p>
+          </div>
           <div>
             <label for="regZip">郵便番号（任意）</label>
             <input id="regZip" type="text" inputmode="numeric" maxlength="8" autocomplete="postal-code" placeholder="例：1850012">
@@ -71,6 +75,10 @@
           <div>
             <label for="regBuilding">建物名・部屋番号（任意）</label>
             <input id="regBuilding" type="text" maxlength="160" autocomplete="address-line2">
+          </div>
+          <div>
+            <label for="regNearestStation">最寄り駅</label>
+            <input id="regNearestStation" type="text" maxlength="80" placeholder="例：国分寺駅">
           </div>
           <div>
             <label for="regPhone">電話番号</label>
@@ -172,7 +180,7 @@
           </div>
           <div>
             <label for="adminSearch">検索</label>
-            <input id="adminSearch" type="text" placeholder="番号・氏名・住所・備考">
+            <input id="adminSearch" type="text" placeholder="番号・氏名・住所">
           </div>
           <div>
             <button id="adminSearchButton" type="button">検索する</button>
@@ -199,7 +207,6 @@
             <tr>
               <th>警備員</th>
               <th>勤務希望</th>
-              <th>備考・更新方法</th>
               <th>住所・連絡先</th>
               <th>操作</th>
             </tr>
@@ -692,6 +699,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260801-13"></script>
+  <script type="module" src="./js/app.js?v=20260801-18"></script>
 </body>
 </html>

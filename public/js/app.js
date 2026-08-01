@@ -1,14 +1,14 @@
-import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-2";
+import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-5";
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260801-1";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-2";
-import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-8";
+import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-11";
 import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260801-2";
 import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-5";
 import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260801-1";
 import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260801-1";
 import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260801-2";
-import { initAccountApprovals, showAccountApprovals, stopAccountApprovals } from "./account-approvals.js?v=20260801-1";
-import { ALL_BRANCHES, effectiveBranchId, ensureBranchDocuments, getAdminSelectedBranchId, isOperationalAccount, populateBranchSelect, setAdminSelectedBranchId } from "./branches.js?v=20260801-1";
+import { initAccountApprovals, showAccountApprovals, stopAccountApprovals } from "./account-approvals.js?v=20260801-2";
+import { ALL_BRANCHES, branchName, effectiveBranchId, ensureBranchDocuments, getAdminSelectedBranchId, isOperationalAccount, populateBranchSelect, setAdminSelectedBranchId } from "./branches.js?v=20260801-1";
 
 const el = {};
 let toastTimer;
@@ -42,7 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function cacheElements() {
   ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
-   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regZip","regPref","regCity","regStreet","regBuilding","regPhone","regEmail","regPassword",
+   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regStaffRequested","regZip","regPref","regCity","regStreet","regBuilding","regNearestStation","regPhone","regEmail","regPassword",
    "regPasswordConfirm","pendingLogoutButton","rejectedLogoutButton","rejectedAccountReason",
    "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
@@ -219,7 +219,9 @@ async function register() {
     postalCode: el.regZip.value.replace(/\D/g, ""),
     prefecture: el.regPref.value.trim(), city: el.regCity.value.trim(),
     addressLine: el.regStreet.value.trim(), building: el.regBuilding.value.trim(),
+    nearestStation: el.regNearestStation.value.trim(),
     phone: el.regPhone.value.trim(), contactEmail: el.regEmail.value.trim().toLowerCase(),
+    staffRequested: el.regStaffRequested.checked,
     password: el.regPassword.value
   };
   const errors = validateRegistration(form, el.regPasswordConfirm.value);
@@ -235,7 +237,12 @@ async function register() {
     catch (error) {
       registrationInProgress = false;
       console.error(error);
-      showMessage(el.registerMessage, "登録できませんでした。警備員番号が既に使われている可能性があります。", true);
+      const message = error?.code === "auth/email-already-in-use"
+        ? "この警備員番号のログイン用アカウントがFirebase Authenticationに残っています。管理者へ確認してください。"
+        : error?.registrationStage === "firestoreReservation"
+          ? "この警備員番号は利用中・承認待ち・利用停止中、または番号予約データが残っています。管理者へ確認してください。"
+          : "登録できませんでした。時間をおいてもう一度お試しください。";
+      showMessage(el.registerMessage, message, true);
     }
   });
 }
@@ -250,6 +257,8 @@ function validateRegistration(form, confirmation) {
   if (form.prefecture.length > 20 || form.city.length > 80 || form.addressLine.length > 160 || form.building.length > 160) {
     errors.push("住所が長すぎます");
   }
+  if (!form.nearestStation) errors.push("最寄り駅を入力してください");
+  else if (form.nearestStation.length > 80) errors.push("最寄り駅は80文字以内で入力してください");
   const phoneDigits = form.phone.replace(/\D/g, "");
   if (!form.phone) errors.push("電話番号を入力してください");
   else if (!/^[0-9+\-() 　]+$/.test(form.phone) || phoneDigits.length < 9 || phoneDigits.length > 11) {
@@ -273,18 +282,30 @@ async function showRequests() {
       card.className = "request-card";
       const date = item.createdAt?.toDate?.().toLocaleString("ja-JP") || "―";
       card.innerHTML = `<div><b>警備員番号：</b>${escapeHtml(item.employeeNumber)}</div>
-        <div><b>氏名：</b>${escapeHtml(item.name)}</div><div><b>所属支社：</b>${escapeHtml(item.branchId)}</div>
+        <div><b>氏名：</b>${escapeHtml(item.name)}</div><div><b>所属支社：</b>${escapeHtml(branchName(item.branchId))}</div>
         <div><b>申請日時：</b>${escapeHtml(date)}</div><div><b>現在の状態：</b>${escapeHtml(item.status)}</div>`;
       if (item.status === "pending" && roleData?.role === "admin") {
         const actions = document.createElement("div"); actions.className = "request-actions";
+        const requestButtons = [];
         [["承認","approved"],["却下","rejected"]].forEach(([label, decision]) => {
           const button = document.createElement("button"); button.textContent = label;
           if (decision === "rejected") button.className = "secondary";
           button.addEventListener("click", async () => {
-            button.disabled = true;
-            try { await reviewStaffRequest(item, decision); await showRequests(); }
-            catch (error) { console.error(error); showMessage(el.staffRequestsMessage, "処理できませんでした。", true); }
+            requestButtons.forEach(itemButton => { itemButton.disabled = true; });
+            button.textContent = "処理中...";
+            try {
+              await reviewStaffRequest(item, decision);
+              await showRequests();
+              showMessage(el.staffRequestsMessage,
+                decision === "approved" ? "内勤者申請を承認しました。" : "内勤者申請を却下しました。", false);
+            } catch (error) {
+              console.error(`内勤者申請の${decision === "approved" ? "承認" : "却下"}に失敗しました`, error);
+              requestButtons.forEach(itemButton => { itemButton.disabled = false; });
+              button.textContent = label;
+              showMessage(el.staffRequestsMessage, staffRequestErrorMessage(error), true);
+            }
           });
+          requestButtons.push(button);
           actions.appendChild(button);
         });
         card.appendChild(actions);
@@ -293,6 +314,17 @@ async function showRequests() {
     });
     if (!requests.length) el.staffRequestsList.innerHTML = '<div class="panel">申請はありません。</div>';
   } catch (error) { console.error(error); showMessage(el.staffRequestsMessage, "申請を読み込めませんでした。", true); }
+}
+
+function staffRequestErrorMessage(error) {
+  const code = String(error?.code || "").replace("firestore/", "");
+  if (code === "permission-denied") return "この操作を実行する権限がありません。";
+  if (code === "not-found") return "対象の申請データが見つかりません。";
+  if (code === "failed-precondition") return "対象ユーザーの登録情報が不足しています。";
+  if (["unavailable", "deadline-exceeded", "network-request-failed"].includes(code)) {
+    return "通信に失敗しました。時間をおいて再度お試しください。";
+  }
+  return "内勤者申請を処理できませんでした。時間をおいて再度お試しください。";
 }
 
 async function signOutUser() {

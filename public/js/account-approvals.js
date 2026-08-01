@@ -40,13 +40,18 @@ function subscribePendingAccounts() {
   el.accountApprovalsMessage.className = "message show";
   const pendingQuery = query(collection(db, "userRoles"), where("accountStatus", "==", "pending"));
   unsubscribe = onSnapshot(pendingQuery, async snapshot => {
-    const userSnapshots = await Promise.all(snapshot.docs.map(item => getDoc(doc(db, "users", item.id))));
+    const relatedSnapshots = await Promise.all(snapshot.docs.map(item => Promise.all([
+      getDoc(doc(db, "users", item.id)),
+      getDoc(doc(db, "staffRequests", item.id))
+    ])));
     const selectedBranch = getAdminSelectedBranchId();
     const rows = snapshot.docs.map((roleDoc, index) => ({
       uid: roleDoc.id,
-      ...userSnapshots[index].data(),
-      ...roleDoc.data()
-    })).filter(account => selectedBranch === ALL_BRANCHES || account.requestedBranchId === selectedBranch)
+      ...relatedSnapshots[index][0].data(),
+      ...roleDoc.data(),
+      staffRequestStatus: relatedSnapshots[index][1].exists() ? relatedSnapshots[index][1].data().status : null
+    })).filter(account => account.staffRequestStatus !== "pending")
+      .filter(account => selectedBranch === ALL_BRANCHES || account.requestedBranchId === selectedBranch)
       .sort((a, b) => timestampMillis(a.createdAt) - timestampMillis(b.createdAt));
     renderRows(rows);
     el.accountApprovalsMessage.className = "message";
