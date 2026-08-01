@@ -8,7 +8,8 @@ import {
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { createMapAddressLink, createMapButton } from "./map-link.js";
-import { createSelfProgressSection } from "./shift-progress.js";
+// app.js と同じURLに統一し、初期化済みのモジュールインスタンスを共有する。
+import { createSelfProgressSection } from "./shift-progress.js?v=20260730-2";
 
 let el;
 let navigate;
@@ -40,12 +41,11 @@ export function showOwnShifts(profile) {
   el.ownShiftsMessage.textContent = "確定シフトを読み込んでいます。";
   el.ownShiftsMessage.className = "message show";
   unsubscribe?.();
-  const ownQuery = query(
-    collection(db, "shiftGroups"),
-    where("branchId", "==", profile.branchId),
-    where("status", "==", "confirmed"),
-    where("memberUids", "array-contains", profile.uid)
-  );
+  const ownQuery = profile.branchId
+    ? query(collection(db, "shiftGroups"), where("branchId", "==", profile.branchId),
+      where("status", "==", "confirmed"), where("memberUids", "array-contains", profile.uid))
+    : query(collection(db, "shiftGroups"), where("status", "==", "confirmed"),
+      where("memberUids", "array-contains", profile.uid));
   unsubscribe = onSnapshot(ownQuery, snapshot => {
     closeMembers();
     const today = toDateKey(new Date());

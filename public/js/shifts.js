@@ -1,5 +1,6 @@
 import { db } from "./firebase-config.js";
 import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { ALL_BRANCHES, BRANCHES, branchName, effectiveBranchId, isBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
 let currentRole;
@@ -20,9 +21,15 @@ let memberProfilesBackfilled = false;
 
 export async function loadOwnConfirmedShifts(uid, branchId) {
   const base = collection(db, "shiftGroups");
+  const memberQuery = branchId
+    ? query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("memberUids", "array-contains", uid))
+    : query(base, where("status", "==", "confirmed"), where("memberUids", "array-contains", uid));
+  const leaderQuery = branchId
+    ? query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("leaderUid", "==", uid))
+    : query(base, where("status", "==", "confirmed"), where("leaderUid", "==", uid));
   const [memberSnapshot, legacyLeaderSnapshot] = await Promise.all([
-    getDocs(query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("memberUids", "array-contains", uid))),
-    getDocs(query(base, where("branchId", "==", branchId), where("status", "==", "confirmed"), where("leaderUid", "==", uid)))
+    getDocs(memberQuery),
+    getDocs(leaderQuery)
   ]);
   return [...new Map(
     [...memberSnapshot.docs, ...legacyLeaderSnapshot.docs].map(item => [item.id, { id: item.id, ...item.data() }])
@@ -32,6 +39,7 @@ export async function loadOwnConfirmedShifts(uid, branchId) {
 export function initShifts(elements, showScreen, notify) {
   el = elements;
   notifyUser = notify;
+  BRANCHES.forEach(branch => el.shiftGroupBranch.add(new Option(branch.name, branch.id)));
   for (let hour = 0; hour < 24; hour += 1) {
     const option = document.createElement("option");
     option.value = String(hour).padStart(2, "0");
@@ -87,6 +95,12 @@ export function initShifts(elements, showScreen, notify) {
     setCandidatesExpanded(el.showOutsideAvailability.checked);
     renderCandidates();
   });
+  el.showOtherBranchCandidates.addEventListener("change", loadCandidates);
+  el.shiftGroupBranch.addEventListener("change", () => {
+    selectedMembers.clear();
+    selectedLeader = null;
+    loadCandidates();
+  });
   el.cancelShiftDateActionButton.addEventListener("click", closeDateActionModal);
   el.saveShiftDateActionButton.addEventListener("click", () => runCardOperation(saveDateAction));
   el.shiftDateActionModal.addEventListener("click", event => {
@@ -140,15 +154,18 @@ function setType(value) {
 async function renderGroups() {
   if (!currentRole) return;
   closeCardMenu();
-  const groupQuery = query(
-    collection(db, "shiftGroups"),
-    where("branchId", "==", currentRole.branchId),
-    where("date", "==", el.shiftBuilderDate.value),
-    where("shiftType", "==", type())
-  );
+  const branchId = effectiveBranchId(currentRole);
+  const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
+  el.newShiftGroupButton.disabled = false;
+  el.shiftBuilderMessage.textContent = allBranches ? "すべての支社を表示中です。新規作成時に作成先支社を選択してください。" : "";
+  el.shiftBuilderMessage.className = allBranches ? "message show" : "message";
+  const groupQuery = allBranches
+    ? query(collection(db, "shiftGroups"), where("date", "==", el.shiftBuilderDate.value), where("shiftType", "==", type()))
+    : query(collection(db, "shiftGroups"), where("branchId", "==", branchId),
+      where("date", "==", el.shiftBuilderDate.value), where("shiftType", "==", type()));
   const [groupSnapshot, profileSnapshot] = await Promise.all([
     getDocs(groupQuery),
-    getDocs(query(collection(db, "users"), where("branchId", "==", currentRole.branchId)))
+    getDocs(allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId)))
   ]);
   groups = groupSnapshot.docs.map(item => normalizeGroup({ id: item.id, ...item.data() }));
   profileNames = new Map(profileSnapshot.docs.map(item => [item.id, item.data().name]));
@@ -169,6 +186,7 @@ async function renderGroups() {
         </div>
       </div>
       <h2 class="group-card-title">${safe(group.title || "名称未入力のグループ")}</h2>
+      ${allBranches ? `<div><b>支社：</b>${safe(branchName(group.branchId))}</div>` : ""}
       <div>${safe(group.address || "現場住所未入力")}</div>
       <div>勤務開始：${safe(displayStartTime(group.startTime) || "開始時刻未入力")}</div>
       <div>隊長：${safe(group.leaderUid ? nameOf(group.leaderUid) : "未選択")}　配置人数：${group.memberUids.length}人</div>
@@ -267,6 +285,7 @@ async function changeShiftType(group, targetType) {
     shiftType: targetType,
     updatedAt: serverTimestamp()
   });
+  await syncShiftCandidateAssignments(group.id, { ...group, shiftType: targetType });
   notifyUser(`${typeLabel}に変更しました。`);
   await renderGroups();
 }
@@ -336,6 +355,7 @@ async function changeGroupDate(group, targetDate) {
     date: targetDate,
     updatedAt: serverTimestamp()
   });
+  await syncShiftCandidateAssignments(group.id, { ...group, date: targetDate });
   notifyUser(`${formatJapaneseDate(targetDate)}に変更しました。`);
   await renderGroups();
 }
@@ -357,6 +377,7 @@ async function duplicateGroup(group, targetDate) {
     updatedAt: serverTimestamp()
   };
   const created = await addDoc(collection(db, "shiftGroups"), copied);
+  await syncShiftCandidateAssignments(created.id, copied);
   recentlyDuplicatedIds.add(created.id);
   el.shiftBuilderDate.value = targetDate;
   setTypeClasses(group.shiftType);
@@ -380,6 +401,7 @@ async function deleteGroup(group) {
   const message = `${warning}\n\nこの操作は元に戻せません。`;
   if (!await confirmOperation(message, "削除する", true)) return;
   await deleteDoc(doc(db, "shiftGroups", group.id));
+  await syncShiftCandidateAssignments(group.id, null);
   notifyUser("シフトを削除しました。");
   await renderGroups();
 }
@@ -412,7 +434,7 @@ async function duplicateAssignmentWarning(group, targetDate, targetType, exclude
   if (!group.memberUids.length) return "";
   const snapshot = await getDocs(query(
     collection(db, "shiftGroups"),
-    where("branchId", "==", currentRole.branchId),
+    where("branchId", "==", group.branchId),
     where("date", "==", targetDate),
     where("shiftType", "==", targetType)
   ));
@@ -442,6 +464,8 @@ function setTypeClasses(value) {
 
 async function openEditor(group = null) {
   const normalized = group ? normalizeGroup(group) : null;
+  const selectedViewBranch = effectiveBranchId(currentRole);
+  const selectingBranch = currentRole.role === "admin" && selectedViewBranch === ALL_BRANCHES && !normalized;
   editingId = normalized?.id || null;
   selectedLeader = normalized?.leaderUid || null;
   selectedMembers = new Set(normalized?.memberUids || []);
@@ -459,6 +483,9 @@ async function openEditor(group = null) {
   el.shiftStartHour.value = startHour;
   el.shiftStartMinute.value = startMinute;
   el.shiftDepartureCheckTime.value = normalized?.departureCheckTime || "";
+  el.shiftGroupBranchWrap.hidden = currentRole.role !== "admin" || (selectedViewBranch !== ALL_BRANCHES && !normalized);
+  el.shiftGroupBranch.disabled = Boolean(normalized) || !selectingBranch;
+  el.shiftGroupBranch.value = normalized?.branchId || (isBranchId(selectedViewBranch) ? selectedViewBranch : "");
   closeRequiredMembersOptions();
   el.memberSearch.value = "";
   el.showOutsideAvailability.checked = false;
@@ -478,33 +505,66 @@ function closeEditor() {
 }
 
 async function loadCandidates() {
-  const branch = currentRole.branchId;
+  const branch = editingId
+    ? groups.find(group => group.id === editingId)?.branchId
+    : (currentRole.role === "admin" ? el.shiftGroupBranch.value : effectiveBranchId(currentRole));
+  if (!isBranchId(branch)) {
+    candidates = [];
+    el.memberCandidates.textContent = "先に作成先支社を選択してください。";
+    selectedMembers.clear();
+    selectedLeader = null;
+    renderSelectedMembers();
+    return;
+  }
   const date = el.shiftBuilderDate.value;
-  const [usersSnap, rolesSnap, availabilitySnap, groupsSnap] = await Promise.all([
+  const includeOtherBranches = currentRole.role === "staff" && el.showOtherBranchCandidates.checked;
+  const [usersSnap, rolesSnap, availabilitySnap, groupsSnap, externalProfilesSnap] = await Promise.all([
     getDocs(query(collection(db, "users"), where("branchId", "==", branch))),
     getDocs(query(collection(db, "userRoles"), where("branchId", "==", branch))),
-    getDocs(query(collection(db, "availability"), where("branchId", "==", branch), where("date", "==", date))),
-    getDocs(query(collection(db, "shiftGroups"), where("branchId", "==", branch), where("date", "==", date), where("shiftType", "==", type())))
+    includeOtherBranches
+      ? getDocs(query(collection(db, "shiftCandidateAvailability"), where("date", "==", date)))
+      : getDocs(query(collection(db, "availability"), where("branchId", "==", branch), where("date", "==", date))),
+    includeOtherBranches
+      ? getDocs(query(collection(db, "shiftCandidateAssignments"), where("date", "==", date), where("shiftType", "==", type())))
+      : getDocs(query(collection(db, "shiftGroups"), where("branchId", "==", branch), where("date", "==", date), where("shiftType", "==", type()))),
+    includeOtherBranches
+      ? getDocs(query(collection(db, "shiftCandidateProfiles"), where("accountStatus", "in", ["active", "approved"])))
+      : Promise.resolve({ docs: [] })
   ]);
   const roles = new Map(rolesSnap.docs.map(item => [item.id, item.data()]));
   const availability = new Map(availabilitySnap.docs.map(item => [item.data().uid, item.data()]));
   const occupied = new Map();
-  groupsSnap.docs.filter(item => item.id !== editingId).forEach(item => {
-    normalizeGroup(item.data()).memberUids.forEach(uid => occupied.set(uid, item.data().title || "名称未入力のグループ"));
+  groupsSnap.docs.filter(item => item.id !== editingId && item.data().shiftGroupId !== editingId).forEach(item => {
+    if (includeOtherBranches) occupied.set(item.data().uid, item.data().title || "名称未入力のグループ");
+    else normalizeGroup(item.data()).memberUids.forEach(uid => occupied.set(uid, item.data().title || "名称未入力のグループ"));
   });
-  candidates = usersSnap.docs.map(item => {
+  const ownCandidates = usersSnap.docs.map(item => {
     const role = roles.get(item.id);
     const wish = availability.get(item.id);
     return {
       uid: item.id,
       ...item.data(),
-      active: role?.accountStatus === "active",
+      active: isOperationalAccount(role?.accountStatus),
       wants: Boolean(wish?.[type()]),
       availabilityNote: String(wish?.note || ""),
       occupied: occupied.get(item.id) || ""
     };
-  // 将来的に勤務可否は role ではなく shiftEligible などの専用属性で管理する。
   }).filter(person => person.active);
+  const externalCandidates = externalProfilesSnap.docs
+    .map(item => ({ uid: item.id, ...item.data() }))
+    .filter(person => person.branchId !== branch && isOperationalAccount(person.accountStatus))
+    .map(person => {
+      const wish = availability.get(person.uid);
+      return {
+        ...person, active: true, wants: Boolean(wish?.[type()]),
+        availabilityNote: String(wish?.note || ""), occupied: occupied.get(person.uid) || "",
+        isOtherBranch: true
+      };
+    })
+    // 他支社候補は「勤務可能」の要件を満たす人だけを表示する。
+    .filter(person => person.wants);
+  // 将来的に勤務可否は role ではなく shiftEligible などの専用属性で管理する。
+  candidates = [...ownCandidates, ...externalCandidates];
   renderCandidates();
 }
 
@@ -596,7 +656,8 @@ function candidateRow(person, checked, onChange) {
   input.addEventListener("change", onChange);
   const requestedShift = person.wants ? (type() === "day" ? "日勤" : "夜勤") : "希望なし";
   label.append(input, document.createTextNode(
-    `${person.name}／${person.employeeNumber}／${requestedShift}／最寄り駅 ${person.nearestStation || "―"}`
+    `${person.name}／${person.employeeNumber}／${requestedShift}／最寄り駅 ${person.nearestStation || "―"}` +
+    `${person.isOtherBranch ? `／${branchName(person.branchId)}` : ""}`
   ));
   row.appendChild(label);
   if (person.availabilityNote) {
@@ -629,7 +690,9 @@ function currentFormData(status = "draft") {
   return {
     date: el.shiftBuilderDate.value,
     shiftType: type(),
-    branchId: currentRole.branchId,
+    branchId: editingId
+      ? groups.find(group => group.id === editingId)?.branchId
+      : (currentRole.role === "admin" ? el.shiftGroupBranch.value : effectiveBranchId(currentRole)),
     title: el.shiftGroupTitle.value.trim(),
     clientName: "",
     address: el.shiftAddress.value.trim(),
@@ -680,6 +743,11 @@ function incompleteIssues(group) {
 
 async function saveGroup(status, notify) {
   const data = currentFormData(status);
+  if (!isBranchId(data.branchId)) {
+    alert("作成先支社を選択してください。");
+    el.shiftGroupBranch.focus();
+    return;
+  }
   if (data.date < localKey(new Date())) {
     alert("過去の日付にはシフトを作成できません。");
     return;
@@ -709,10 +777,29 @@ async function saveGroup(status, notify) {
     updatedAt: serverTimestamp()
   });
   await batch.commit();
+  await syncShiftCandidateAssignments(shiftRef.id, data);
   await syncShiftMemberProfiles(shiftRef.id, data, status);
   closeEditor();
   notify(status === "confirmed" ? "シフトを確定しました。" : "下書きを保存しました。");
   await renderGroups();
+}
+
+async function syncShiftCandidateAssignments(shiftGroupId, data) {
+  const existing = await getDocs(query(
+    collection(db, "shiftCandidateAssignments"), where("shiftGroupId", "==", shiftGroupId)
+  ));
+  const batch = writeBatch(db);
+  existing.docs.forEach(item => batch.delete(item.ref));
+  if (data) {
+    data.memberUids.forEach(uid => {
+      batch.set(doc(db, "shiftCandidateAssignments", `${shiftGroupId}_${uid}`), {
+        shiftGroupId, uid, branchId: data.branchId, date: data.date,
+        shiftType: data.shiftType, title: String(data.title || "").slice(0, 80),
+        updatedAt: serverTimestamp()
+      });
+    });
+  }
+  await batch.commit();
 }
 
 async function syncShiftMemberProfiles(shiftId, data, status) {
@@ -749,7 +836,8 @@ async function syncShiftMemberProfiles(shiftId, data, status) {
 }
 
 async function backfillConfirmedMemberProfiles() {
-  const branchId = currentRole.branchId;
+  const branchId = effectiveBranchId(currentRole);
+  if (branchId === ALL_BRANCHES) return;
   const [shiftSnapshot, usersSnapshot] = await Promise.all([
     getDocs(query(collection(db, "shiftGroups"), where("branchId", "==", branchId), where("status", "==", "confirmed"))),
     getDocs(query(collection(db, "users"), where("branchId", "==", branchId)))

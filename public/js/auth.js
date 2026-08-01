@@ -8,6 +8,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 import {
   doc,
+  deleteField,
   getDoc,
   onSnapshot,
   serverTimestamp,
@@ -29,25 +30,20 @@ export async function registerGuard(form) {
   const user = credential.user;
   const batch = writeBatch(db);
   const now = serverTimestamp();
-  batch.set(doc(db, "employeeNumbers", form.employeeNumber), { uid: user.uid });
+  batch.set(doc(db, "employeeNumbers", form.employeeNumber), {
+    uid: user.uid, accountStatus: "pending", requestedBranchId: form.requestedBranchId
+  });
   batch.set(doc(db, "users", user.uid), {
-    employeeNumber: form.employeeNumber, name: form.name, contactEmail: form.email,
-    postalCode: form.postalCode, prefecture: form.prefecture, city: form.city,
-    addressLine: form.addressLine, building: form.building,
-    nearestStation: form.nearestStation, branchId: "kokubunji",
+    employeeNumber: form.employeeNumber, name: form.name, contactEmail: "",
+    postalCode: "", prefecture: "", city: "", addressLine: "", building: "",
+    nearestStation: "", requestedBranchId: form.requestedBranchId,
+    inputMode: "web", authUid: user.uid,
     createdAt: now, updatedAt: now
   });
   batch.set(doc(db, "userRoles", user.uid), {
-    role: "guard", branchId: "kokubunji", accountStatus: "active",
+    role: "guard", accountStatus: "pending", requestedBranchId: form.requestedBranchId,
     leaderEligible: false, createdAt: now, updatedAt: now
   });
-  if (form.staffRequested) {
-    batch.set(doc(db, "staffRequests", user.uid), {
-      uid: user.uid, employeeNumber: form.employeeNumber,
-      name: form.staffRequestName, branchId: form.staffRequestBranch,
-      status: "pending", createdAt: now, updatedAt: now
-    });
-  }
   try {
     await batch.commit();
     return user;
@@ -62,6 +58,13 @@ export function observeAuthState(callback) { return onAuthStateChanged(auth, cal
 export function observeOwnRole(uid, callback, onError) {
   return onSnapshot(doc(db, "userRoles", uid),
     snapshot => callback(snapshot.exists() ? snapshot.data() : null), onError);
+}
+export function removeLegacyAdminBranch(uid) {
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+  batch.update(doc(db, "userRoles", uid), { branchId: deleteField(), updatedAt: now });
+  batch.update(doc(db, "users", uid), { branchId: deleteField(), updatedAt: now });
+  return batch.commit();
 }
 export async function loadOwnProfile(user) {
   const snapshot = await getDoc(doc(db, "users", user.uid));

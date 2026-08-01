@@ -1,12 +1,14 @@
-import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard } from "./auth.js?v=20260722-3";
-import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260730-2";
+import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-1";
+import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260801-1";
 import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-2";
-import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260730-3";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260730-3";
-import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showGuardManagement } from "./guard-management.js?v=20260730-5";
-import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260730-1";
-import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260730-3";
-import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260730-2";
+import { initAdmin, loadStaffRequests, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-5";
+import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260801-2";
+import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-2";
+import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260801-1";
+import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260801-1";
+import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260801-2";
+import { initAccountApprovals, showAccountApprovals, stopAccountApprovals } from "./account-approvals.js?v=20260801-1";
+import { ALL_BRANCHES, effectiveBranchId, ensureBranchDocuments, getAdminSelectedBranchId, isOperationalAccount, populateBranchSelect, setAdminSelectedBranchId } from "./branches.js?v=20260801-1";
 
 const el = {};
 let toastTimer;
@@ -26,22 +28,25 @@ document.addEventListener("DOMContentLoaded", () => {
   initProxyInput(el, showScreen, openProxyCalendar);
   initShiftConfirmation(el, showScreen);
   initShiftProgress(el, showScreen, showToast);
+  initAccountApprovals(el, showScreen);
+  populateBranchSelect(el.regRequestedBranch);
+  populateBranchSelect(el.adminBranchSwitch, { includeAll: true });
+  el.adminBranchSwitch.value = getAdminSelectedBranchId();
   bindEvents();
   observeAuthState(handleAuthState);
 });
 
 function cacheElements() {
-  ["loginScreen","registerScreen","calendarScreen","adminScreen","staffRequestsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
+  ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
-   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regEmail","regZip",
-   "regPref","regCity","regStreet","regBuilding","regNearestStation","regPassword",
-   "regPasswordConfirm","regStaffRequested","staffRequestFields","regStaffName","regStaffBranch",
+   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regPassword",
+   "regPasswordConfirm","pendingLogoutButton","rejectedLogoutButton","rejectedAccountReason",
    "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
    "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
    "adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
-   "menuButton","requestsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","dailyProgressMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
-   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuDailyProgressButton","menuRequestsButton","menuLogoutButton",
+   "menuButton","requestsMenuButton","accountApprovalsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","dailyProgressMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
+   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuDailyProgressButton","applicationsMenuGroup","menuRequestsButton","menuAccountApprovalsButton","adminBranchSwitchWrap","adminBranchSwitch","menuLogoutButton",
    "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
    "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
    "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName","managedGuardPhone",
@@ -53,13 +58,14 @@ function cacheElements() {
    "webProxyConfirmModal","webProxyConfirmMessage","cancelWebProxyButton","startWebProxyButton",
    "proxyReasonModal","proxyReasonStep","proxyConfirmStep","proxyUpdateReason","proxyUpdateReasonNoteWrap","proxyUpdateReasonNote","proxyReasonMessage","cancelProxyReasonButton","continueProxyReasonButton","proxySaveConfirmation","backProxyReasonButton","confirmProxySaveButton",
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
+   "accountApprovalsMessage","accountApprovalsTableBody","accountApprovalsCards","accountRejectionModal","accountRejectionTarget","accountRejectionReason","accountRejectionMessage","cancelAccountRejectionButton","confirmAccountRejectionButton",
    "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
    "ownShiftsMessage","ownShiftsList","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
    "shiftMembersModal","shiftMembersTitle","shiftMembersSummary","shiftMembersList","closeShiftMembersButton",
    "dailyProgressMessage","progressDate","progressShiftType","progressFilters","dailyProgressTableBody","dailyProgressCards",
    "departureTimeModal","departureTimeInput","departureTimeMessage","cancelDepartureTimeButton","confirmDepartureTimeButton",
-   "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton",
-   "shiftGroupModal","shiftGroupModalTitle","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftDepartureCheckTime","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
+   "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton","otherBranchCandidatesOption","showOtherBranchCandidates",
+   "shiftGroupModal","shiftGroupModalTitle","shiftGroupBranchWrap","shiftGroupBranch","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftDepartureCheckTime","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
    "shiftOperationConfirmModal","shiftOperationConfirmTitle","shiftOperationConfirmMessage","confirmShiftOperationButton","cancelShiftOperationButton",
    "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails",
@@ -74,13 +80,11 @@ function bindEvents() {
   el.backLoginButton.addEventListener("click", () => showScreen("login"));
   el.forgotPasswordButton.addEventListener("click", () =>
     showMessage(el.loginMessage, "パスワードを忘れた場合は、国分寺支社の内勤者へ連絡してください。", false));
-  el.regStaffRequested.addEventListener("change", () => {
-    el.staffRequestFields.hidden = !el.regStaffRequested.checked;
-    if (el.regStaffRequested.checked && !el.regStaffName.value) el.regStaffName.value = el.regName.value;
-  });
   el.registerButton.addEventListener("click", register);
+  el.pendingLogoutButton.addEventListener("click", signOutUser);
+  el.rejectedLogoutButton.addEventListener("click", signOutUser);
   el.openAdminButton.addEventListener("click", openMenu);
-  [el.menuButton, el.requestsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton, el.dailyProgressMenuButton]
+  [el.menuButton, el.requestsMenuButton, el.accountApprovalsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton, el.dailyProgressMenuButton]
     .forEach(button => button.addEventListener("click", openMenu));
   el.closeMenuButton.addEventListener("click", closeMenu);
   el.sideMenuBackdrop.addEventListener("click", event => { if (event.target === el.sideMenuBackdrop) closeMenu(); });
@@ -103,6 +107,21 @@ function bindEvents() {
     closeMenu(); await loadOwnAvailability(profile.uid); showScreen("calendar"); showCalendar(profile);
   });
   el.menuRequestsButton.addEventListener("click", async () => { closeMenu(); await showRequests(); });
+  el.menuAccountApprovalsButton.addEventListener("click", () => { closeMenu(); showAccountApprovals(profile, roleData); });
+  el.adminBranchSwitch.addEventListener("change", () => {
+    const previousBranchId = getAdminSelectedBranchId();
+    const nextBranchId = el.adminBranchSwitch.value;
+    const accepted = window.confirm(
+      "本当に支社を切り替えますか？\n\n切替後はサイトが自動でリロードされます。"
+    );
+    if (!accepted) {
+      el.adminBranchSwitch.value = previousBranchId;
+      return;
+    }
+    setAdminSelectedBranchId(nextBranchId);
+    closeMenu();
+    window.location.reload();
+  });
   el.menuLogoutButton.addEventListener("click", signOutUser);
   el.cancelWebProxyButton.addEventListener("click", () => closeWebProxyConfirm(false));
   el.startWebProxyButton.addEventListener("click", () => closeWebProxyConfirm(true));
@@ -128,19 +147,45 @@ async function handleAuthState(user) {
 }
 
 async function handleRoleChange(nextRole) {
-  if (!nextRole || nextRole.accountStatus !== "active") {
+  if (!nextRole) {
     await signOutUser();
     showMessage(el.loginMessage, "このアカウントは現在利用できません。国分寺支社へお問い合わせください。", true);
     return;
   }
   roleData = nextRole;
+  if (nextRole.role === "admin" && Object.hasOwn(nextRole, "branchId")) {
+    delete profile.branchId;
+    await removeLegacyAdminBranch(profile.uid);
+    return;
+  }
+  if (nextRole.accountStatus === "pending") {
+    stopAccountApprovals();
+    showScreen("pendingApproval");
+    return;
+  }
+  if (nextRole.accountStatus === "rejected") {
+    stopAccountApprovals();
+    el.rejectedAccountReason.textContent = nextRole.rejectionReason ? `却下理由：${nextRole.rejectionReason}` : "";
+    showScreen("rejectedAccount");
+    return;
+  }
+  if (!isOperationalAccount(nextRole.accountStatus)) {
+    await signOutUser();
+    showMessage(el.loginMessage, "このアカウントは現在利用できません。管理者へお問い合わせください。", true);
+    return;
+  }
   setGuardManagementContext(profile, roleData);
   const isOffice = ["staff", "admin"].includes(roleData.role);
+  if (roleData.role === "admin") await ensureBranchDocuments();
   el.openAdminButton.hidden = false;
   el.menuAdminButton.hidden = !isOffice;
   el.menuShiftBuilderButton.hidden = !isOffice;
   el.menuRequestsButton.hidden = !isOffice;
   el.menuDailyProgressButton.hidden = !isOffice;
+  el.applicationsMenuGroup.hidden = roleData.role !== "admin";
+  el.menuAccountApprovalsButton.hidden = roleData.role !== "admin";
+  el.adminBranchSwitchWrap.hidden = roleData.role !== "admin";
+  el.otherBranchCandidatesOption.hidden = roleData.role !== "staff";
   el.menuCalendarButton.textContent = isOffice ? "自分の勤務希望" : "勤務希望入力";
   el.menuOwnShiftsButton.textContent = isOffice ? "自分のシフト" : "シフト確認";
   if (isOffice) await showAdmin(profile, roleData);
@@ -167,12 +212,7 @@ async function login() {
 async function register() {
   const form = {
     employeeNumber: el.regGuardId.value.trim(), name: el.regName.value.trim(),
-    email: el.regEmail.value.trim(), postalCode: el.regZip.value.replace(/\D/g, ""),
-    prefecture: el.regPref.value.trim(), city: el.regCity.value.trim(),
-    addressLine: el.regStreet.value.trim(), building: el.regBuilding.value.trim(),
-    nearestStation: el.regNearestStation.value.trim(), password: el.regPassword.value,
-    staffRequested: el.regStaffRequested.checked,
-    staffRequestName: el.regStaffName.value.trim(), staffRequestBranch: el.regStaffBranch.value.trim()
+    requestedBranchId: el.regRequestedBranch.value, password: el.regPassword.value
   };
   const errors = validateRegistration(form, el.regPasswordConfirm.value);
   if (errors.length) { showMessage(el.registerMessage, errors.join(" / "), true); return; }
@@ -196,12 +236,9 @@ function validateRegistration(form, confirmation) {
   const errors = [];
   if (!/^\d{6}$/.test(form.employeeNumber)) errors.push("警備員番号は6桁で入力してください");
   if (!form.name || form.name.length > 80) errors.push("氏名を80文字以内で入力してください");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.push("正しい連絡用メールアドレスを入力してください");
-  if (!/^\d{7}$/.test(form.postalCode)) errors.push("郵便番号は7桁で入力してください");
-  if (!form.prefecture || !form.city || !form.addressLine) errors.push("住所を入力してください");
+  if (!["kokubunji", "mitaka"].includes(form.requestedBranchId)) errors.push("希望所属支社を選択してください");
   if (form.password.length < 6) errors.push("パスワードは6文字以上で入力してください");
   if (form.password !== confirmation) errors.push("パスワードが一致していません");
-  if (form.staffRequested && (!form.staffRequestName || !form.staffRequestBranch)) errors.push("内勤者申請の氏名と所属支社を入力してください");
   return errors;
 }
 
@@ -238,18 +275,41 @@ async function showRequests() {
 }
 
 async function signOutUser() {
-  closeMenu(); stopRoleObserver?.(); stopRoleObserver = null;
+  closeMenu(); stopAccountApprovals(); stopRoleObserver?.(); stopRoleObserver = null;
   await logout(); el.loginPassword.value = ""; showToast("ログアウトしました。");
 }
-function openMenu() { if (roleData?.accountStatus === "active") el.sideMenuBackdrop.classList.add("show"); }
-function closeMenu() { el.sideMenuBackdrop.classList.remove("show"); }
+function openMenu() {
+  if (!isOperationalAccount(roleData?.accountStatus)) return;
+  el.sideMenu.scrollTop = 0;
+  document.body.classList.add("side-menu-open");
+  el.sideMenuBackdrop.classList.add("show");
+}
+function closeMenu() {
+  el.sideMenuBackdrop.classList.remove("show");
+  document.body.classList.remove("side-menu-open");
+  el.sideMenu.scrollTop = 0;
+}
 function showScreen(name) {
-  const screens = {login:el.loginScreen, register:el.registerScreen, calendar:el.calendarScreen,
+  const screens = {login:el.loginScreen, register:el.registerScreen,
+    pendingApproval:el.pendingApprovalScreen, rejectedAccount:el.rejectedAccountScreen,
+    calendar:el.calendarScreen,
     admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen,
+    accountApprovals:el.accountApprovalsScreen,
     guardManagement:el.guardManagementScreen, deletedAccounts:el.deletedAccountsScreen,
     proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen, dailyProgress:el.dailyProgressScreen};
   Object.values(screens).forEach(screen => screen?.classList.remove("active"));
   screens[name]?.classList.add("active"); window.scrollTo({top:0, behavior:"smooth"});
+}
+
+async function refreshCurrentOfficeScreen() {
+  if (el.adminScreen.classList.contains("active")) await showAdmin(profile, roleData);
+  else if (el.accountApprovalsScreen.classList.contains("active")) showAccountApprovals(profile, roleData);
+  else if (el.staffRequestsScreen.classList.contains("active")) await showRequests();
+  else if (el.shiftBuilderScreen.classList.contains("active")) await showShiftBuilder(profile, roleData);
+  else if (el.guardManagementScreen.classList.contains("active")) await showGuardManagement(profile, roleData);
+  else if (el.deletedAccountsScreen.classList.contains("active")) await showDeletedAccounts();
+  else if (el.proxyWorkerScreen.classList.contains("active")) await showProxyWorkerList(profile, roleData);
+  else if (el.dailyProgressScreen.classList.contains("active")) await showDailyProgress(profile, roleData);
 }
 async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   if (!canProxyInput(worker)) return;
@@ -281,8 +341,8 @@ function canProxyInput(worker) {
   const inputMode = worker?.inputMode === "managed" ? "managed" : "web";
   return ["staff", "admin"].includes(roleData?.role) &&
     ["managed", "web"].includes(inputMode) &&
-    worker?.accountStatus === "active" &&
-    worker?.branchId === roleData.branchId &&
+    isOperationalAccount(worker?.accountStatus) &&
+    (effectiveBranchId(roleData) === ALL_BRANCHES || worker?.branchId === effectiveBranchId(roleData)) &&
     workerUid !== profile?.uid &&
     (roleData.role === "admin" || worker?.role !== "admin");
 }

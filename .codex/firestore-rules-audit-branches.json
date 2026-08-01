@@ -1,0 +1,41 @@
+{
+  "score": 4,
+  "summary": "Branch and approval rules use default deny, fixed self-registration roles, validated state transitions, sanitized cross-branch candidate collections, and atomic relationship checks. The remaining material concern is that same-branch staff access to the existing users documents includes profile PII; this is required by the current management UI but would be safer with a future public/private profile split.",
+  "findings": [
+    {
+      "check": "Update bypass / privilege escalation",
+      "severity": "minor",
+      "issue": "No bypass found: self-registration is fixed to guard/pending, self role updates cannot grant privileges, and pending transitions require an existing admin plus atomic related writes.",
+      "recommendation": "Keep emulator regression tests for pending-to-approved/rejected transitions when fields are added."
+    },
+    {
+      "check": "Mixed content leak",
+      "severity": "moderate",
+      "issue": "Same-branch staff can read existing users documents containing address and contact data because current staff management and proxy-entry screens require those fields.",
+      "recommendation": "In a later migration, split operational display data from private contact/address data and grant private-profile access only to explicitly authorized office roles."
+    },
+    {
+      "check": "Cross-branch candidate access",
+      "severity": "minor",
+      "issue": "No direct cross-branch users read is granted. Candidate profile and assignment documents are sanitized and writes are checked against authoritative users, userRoles, availability, and shiftGroups documents.",
+      "recommendation": "Keep the sanitized indexes synchronized in every future shift and availability mutation path."
+    }
+  ],
+  "attacks": {
+    "publicList": "blocked by authentication and default deny",
+    "guardReadsOtherUser": "blocked",
+    "selfAssignsStaffOrAdmin": "blocked",
+    "pendingSetsFormalBranch": "blocked",
+    "nonAdminApprovesAccount": "blocked",
+    "approvalBranchMismatch": "blocked by getAfter checks",
+    "employeeNumberRemap": "blocked by immutable uid",
+    "schemaPollution": "blocked on all new documents by hasOnly",
+    "oversizedStrings": "blocked by length validators",
+    "candidateProfileSpoof": "blocked by authoritative getAfter equality checks",
+    "candidateAvailabilitySpoof": "blocked by matching availability getAfter checks",
+    "candidateAssignmentSpoof": "blocked by matching shiftGroup getAfter checks",
+    "crossBranchShiftWriteByStaff": "blocked",
+    "adminMembershipMutationFromBranchSwitch": "not performed; selection is local UI state"
+    ,"legacyBranchEscalation": "blocked; admin-only, operational guard/staff only, missing-to-valid branch only, and users/userRoles must match after the batch"
+  }
+}

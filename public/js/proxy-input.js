@@ -5,6 +5,7 @@ import {
   query,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { ALL_BRANCHES, branchName, effectiveBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
 let navigate;
@@ -27,15 +28,16 @@ export async function showProxyWorkerList(profile = currentProfile, role = curre
   navigate("proxyWorkers");
   el.proxyWorkerMessage.className = "message";
   try {
-    const branchId = currentRole.branchId;
+    const branchId = effectiveBranchId(currentRole);
+    const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
     const [usersSnapshot, rolesSnapshot] = await Promise.all([
-      getDocs(query(collection(db, "users"), where("branchId", "==", branchId))),
-      getDocs(query(collection(db, "userRoles"), where("branchId", "==", branchId)))
+      getDocs(allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId))),
+      getDocs(allBranches ? collection(db, "userRoles") : query(collection(db, "userRoles"), where("branchId", "==", branchId)))
     ]);
     const roles = new Map(rolesSnapshot.docs.map(item => [item.id, item.data()]));
     workers = usersSnapshot.docs
       .map(item => ({ id: item.id, uid: item.id, ...item.data(), accountStatus: roles.get(item.id)?.accountStatus }))
-      .filter(worker => worker.branchId === branchId && worker.inputMode === "managed" && worker.accountStatus === "active")
+      .filter(worker => (allBranches || worker.branchId === branchId) && worker.inputMode === "managed" && isOperationalAccount(worker.accountStatus))
       .sort((a, b) => String(a.employeeNumber).localeCompare(String(b.employeeNumber), "ja"));
     render();
   } catch (error) {
@@ -54,7 +56,10 @@ function render() {
   el.proxyWorkerCards.replaceChildren();
   visible.forEach(worker => {
     const row = document.createElement("tr");
-    [worker.employeeNumber, worker.name, worker.nearestStation || "―"].forEach(value => {
+    const station = currentRole.role === "admin" && effectiveBranchId(currentRole) === ALL_BRANCHES
+      ? `${worker.nearestStation || "―"} / ${branchName(worker.branchId)}`
+      : worker.nearestStation || "―";
+    [worker.employeeNumber, worker.name, station].forEach(value => {
       const cell = document.createElement("td");
       cell.textContent = value;
       row.appendChild(cell);

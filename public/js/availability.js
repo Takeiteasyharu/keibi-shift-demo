@@ -5,7 +5,7 @@ import {
   getDocs,
   query,
   serverTimestamp,
-  setDoc,
+  writeBatch,
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 
@@ -47,7 +47,14 @@ export async function saveAvailability(uid, date, values, branchId = "kokubunji"
     createdAt: previous?.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()
   };
-  await setDoc(reference, data);
+  const batch = writeBatch(db);
+  batch.set(reference, data);
+  batch.set(doc(db, "shiftCandidateAvailability", `${date}_${uid}`), {
+    uid, branchId, date, day: data.day, night: data.night,
+    unavailable: data.unavailable, undecided: data.undecided,
+    note: data.note, updatedAt: data.updatedAt
+  });
+  await batch.commit();
   availabilityByDate.set(date, { ...data, createdAt: previous?.createdAt || new Date() });
   return data;
 }

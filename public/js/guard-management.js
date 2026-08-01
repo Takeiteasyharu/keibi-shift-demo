@@ -6,10 +6,10 @@ import {
   getDocs,
   query,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { ALL_BRANCHES, branchName, effectiveBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
 let navigate;
@@ -87,7 +87,7 @@ export async function showGuardManagement(profile = currentProfile, role = curre
   await loadWorkers();
 }
 
-async function showDeletedAccounts() {
+export async function showDeletedAccounts() {
   requireOfficeRole();
   navigate("deletedAccounts");
   await loadWorkers();
@@ -108,20 +108,23 @@ async function loadWorkers() {
   clearMessage(el.guardManagementMessage);
   clearMessage(el.deletedAccountsMessage);
   try {
-    const branchId = currentRole.branchId;
+    const branchId = effectiveBranchId(currentRole);
+    const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
     const [usersSnapshot, rolesSnapshot] = await Promise.all([
-      getDocs(query(collection(db, "users"), where("branchId", "==", branchId))),
-      getDocs(query(collection(db, "userRoles"), where("branchId", "==", branchId)))
+      getDocs(allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId))),
+      getDocs(allBranches ? collection(db, "userRoles") : query(collection(db, "userRoles"), where("branchId", "==", branchId)))
     ]);
-    const roles = new Map(rolesSnapshot.docs.map(item => [item.id, item.data()]));
+    const roles = createRoleLookup(rolesSnapshot);
     workers = usersSnapshot.docs.map(item => {
-      const roleData = roles.get(item.id) || {};
       const data = item.data();
+      const roleEntry = findRoleEntry(item.id, data, roles);
+      const roleData = roleEntry?.data || {};
       return {
-        id: item.id,
         ...data,
+        id: item.id,
+        uid: roleEntry?.id || data.authUid || data.uid || item.id,
         role: roleData.role || "guard",
-        accountStatus: roleData.accountStatus || "inactive",
+        accountStatus: roleData.accountStatus || null,
         disabledAt: roleData.disabledAt || null,
         disabledByUid: roleData.disabledByUid || "",
         inputMode: data.inputMode === "managed" ? "managed" : "web"
@@ -141,7 +144,7 @@ async function loadWorkers() {
 function renderActiveWorkers() {
   const search = el.guardManagementSearch.value.trim().toLowerCase();
   const visible = workers.filter(worker =>
-    worker.accountStatus === "active" &&
+    isOperationalAccount(worker.accountStatus) &&
     (!search || `${worker.name || ""} ${worker.employeeNumber || ""}`.toLowerCase().includes(search))
   );
   el.guardManagementTableBody.replaceChildren();
@@ -155,7 +158,7 @@ function renderActiveWorker(worker) {
   const values = [
     worker.employeeNumber,
     worker.name,
-    roleLabel(worker.role),
+    viewingAllBranches() ? `${roleLabel(worker.role)} / ${branchName(worker.branchId)}` : roleLabel(worker.role),
     worker.nearestStation || "―",
     worker.contactEmail || "―",
     inputModeLabel(worker.inputMode),
@@ -174,7 +177,8 @@ function renderActiveWorker(worker) {
   details.textContent =
     `警備員番号：${worker.employeeNumber}\n` +
     `最寄り駅：${worker.nearestStation || "―"}\n` +
-    `連絡用メール：${worker.contactEmail || "―"}\n` +
+      `${viewingAllBranches() ? `支社：${branchName(worker.branchId)}\n` : ""}` +
+      `連絡用メール：${worker.contactEmail || "―"}\n` +
     `利用方法：${inputModeLabel(worker.inputMode)}\n` +
     "アカウント状態：利用中";
   card.append(details, createWorkerActionMenu(worker));
@@ -183,7 +187,9 @@ function renderActiveWorker(worker) {
 
 function renderInactiveWorkers() {
   const visible = workers.filter(worker => worker.accountStatus === "inactive");
-  const nameByUid = new Map(workers.map(worker => [worker.id, worker.name]));
+  const nameByUid = new Map();
+  workers.forEach(worker => [worker.id, worker.uid, worker.authUid, worker.workerId]
+    .filter(Boolean).forEach(id => nameByUid.set(id, worker.name)));
   el.deletedAccountsTableBody.replaceChildren();
   el.deletedAccountsCards.replaceChildren();
   visible.forEach(worker => {
@@ -192,7 +198,7 @@ function renderInactiveWorkers() {
     const values = [
       worker.employeeNumber,
       worker.name,
-      roleLabel(worker.role),
+      viewingAllBranches() ? `${roleLabel(worker.role)} / ${branchName(worker.branchId)}` : roleLabel(worker.role),
       worker.nearestStation || "―",
       inputModeLabel(worker.inputMode),
       formatTimestamp(worker.disabledAt),
@@ -211,6 +217,7 @@ function renderInactiveWorkers() {
     details.textContent =
       `警備員番号：${worker.employeeNumber}\n` +
       `最寄り駅：${worker.nearestStation || "―"}\n` +
+      `${viewingAllBranches() ? `支社：${branchName(worker.branchId)}\n` : ""}` +
       `利用方法：${inputModeLabel(worker.inputMode)}\n` +
       `利用停止日時：${formatTimestamp(worker.disabledAt)}\n` +
       `利用停止した担当者：${disabledBy}`;
@@ -219,6 +226,27 @@ function renderInactiveWorkers() {
   });
   renderEmptyState(visible, el.deletedAccountsTableBody, el.deletedAccountsCards, 8,
     "削除済みアカウントはありません。");
+}
+
+function viewingAllBranches() {
+  return currentRole?.role === "admin" && effectiveBranchId(currentRole) === ALL_BRANCHES;
+}
+
+function createRoleLookup(rolesSnapshot) {
+  const lookup = new Map();
+  rolesSnapshot.docs.forEach(item => {
+    const data = item.data();
+    const entry = { id: item.id, data };
+    [item.id, data.uid, data.authUid, data.workerId].filter(Boolean).forEach(id => lookup.set(id, entry));
+  });
+  return lookup;
+}
+
+function findRoleEntry(documentId, user, roleLookup) {
+  for (const id of [documentId, user.authUid, user.uid, user.workerId]) {
+    if (id && roleLookup.has(id)) return roleLookup.get(id);
+  }
+  return null;
 }
 
 function createWorkerCard(worker) {
@@ -297,24 +325,24 @@ function closeActionMenu() {
 
 function canProxyInput(worker) {
   const inputMode = worker.inputMode === "managed" ? "managed" : "web";
-  return worker.accountStatus === "active" &&
+  return isOperationalAccount(worker.accountStatus) &&
     ["managed", "web"].includes(inputMode) &&
     (worker.id || worker.uid) !== currentProfile?.uid &&
-    worker.branchId === currentRole?.branchId &&
+    (currentRole?.role === "admin" || worker.branchId === currentRole?.branchId) &&
     ["staff", "admin"].includes(currentRole?.role) &&
     (currentRole.role === "admin" || worker.role !== "admin");
 }
 
 function canEditWorker(worker) {
-  return worker.accountStatus === "active" &&
+  return isOperationalAccount(worker.accountStatus) &&
     (worker.id || worker.uid) !== currentProfile?.uid &&
-    worker.branchId === currentRole?.branchId &&
+    (currentRole?.role === "admin" || worker.branchId === currentRole?.branchId) &&
     ["staff", "admin"].includes(currentRole?.role) &&
     (currentRole.role === "admin" || worker.role !== "admin");
 }
 
 function canDisable(worker) {
-  return worker.accountStatus === "active" &&
+  return isOperationalAccount(worker.accountStatus) &&
     worker.id !== currentProfile?.uid &&
     worker.role !== "admin" &&
     ["staff", "admin"].includes(currentRole?.role);
@@ -378,25 +406,40 @@ async function applyAccountStatusAction() {
     return;
   }
   el.confirmAccountStatusButton.disabled = true;
+  const buttonLabel = el.confirmAccountStatusButton.textContent;
+  el.confirmAccountStatusButton.textContent = "処理中...";
+  const nextStatus = action === "disable" ? "inactive" : "active";
   try {
-    const roleRef = doc(db, "userRoles", worker.id);
+    const accountId = worker.uid || worker.id;
+    const roleRef = doc(db, "userRoles", accountId);
+    const batch = writeBatch(db);
+    const now = serverTimestamp();
     if (action === "disable") {
-      await updateDoc(roleRef, {
+      batch.update(roleRef, {
         accountStatus: "inactive",
-        disabledAt: serverTimestamp(),
+        disabledAt: now,
         disabledByUid: currentProfile.uid,
-        updatedAt: serverTimestamp()
+        updatedAt: now
       });
+      batch.set(doc(db, "shiftCandidateProfiles", accountId), candidateProfile(worker, accountId, "inactive", now));
+      await batch.commit();
       notify(`${worker.name}さんを利用停止にしました。`);
     } else {
-      await updateDoc(roleRef, {
+      batch.update(roleRef, {
         accountStatus: "active",
         disabledAt: deleteField(),
         disabledByUid: deleteField(),
-        updatedAt: serverTimestamp()
+        updatedAt: now
       });
+      batch.set(doc(db, "shiftCandidateProfiles", accountId), candidateProfile(worker, accountId, "active", now));
+      await batch.commit();
       notify(`${worker.name}さんの利用を再開しました。`);
     }
+    worker.accountStatus = nextStatus;
+    worker.disabledAt = action === "disable" ? new Date() : null;
+    worker.disabledByUid = action === "disable" ? currentProfile.uid : "";
+    renderActiveWorkers();
+    renderInactiveWorkers();
     closeAccountConfirm();
     if (refreshIntegratedManagement) await refreshIntegratedManagement();
     else await loadWorkers();
@@ -409,7 +452,16 @@ async function applyAccountStatusAction() {
     closeAccountConfirm();
   } finally {
     el.confirmAccountStatusButton.disabled = false;
+    el.confirmAccountStatusButton.textContent = buttonLabel;
   }
+}
+
+function candidateProfile(worker, accountId, accountStatus, updatedAt) {
+  return {
+    uid: accountId, employeeNumber: worker.employeeNumber, name: worker.name,
+    nearestStation: worker.nearestStation || "", branchId: worker.branchId,
+    accountStatus, updatedAt
+  };
 }
 
 function openWorkerEditor(worker = null) {
@@ -561,12 +613,14 @@ async function createManagedWorker(form) {
     throw error;
   }
   const workerRef = doc(collection(db, "users"));
+  const branchId = effectiveBranchId(currentRole);
+  if (branchId === ALL_BRANCHES) throw new Error("managed-worker-branch-required");
   const now = serverTimestamp();
   const batch = writeBatch(db);
   batch.set(doc(db, "employeeNumbers", form.employeeNumber), { uid: workerRef.id });
   batch.set(workerRef, {
     ...form,
-    branchId: currentRole.branchId,
+    branchId,
     inputMode: "managed",
     authUid: null,
     createdBy: currentProfile.uid,
@@ -575,11 +629,15 @@ async function createManagedWorker(form) {
   });
   batch.set(doc(db, "userRoles", workerRef.id), {
     role: "guard",
-    branchId: currentRole.branchId,
+    branchId,
     accountStatus: "active",
     leaderEligible: false,
     createdAt: now,
     updatedAt: now
+  });
+  batch.set(doc(db, "shiftCandidateProfiles", workerRef.id), {
+    uid: workerRef.id, employeeNumber: form.employeeNumber, name: form.name,
+    nearestStation: form.nearestStation, branchId, accountStatus: "active", updatedAt: now
   });
   await batch.commit();
 }
@@ -598,7 +656,15 @@ function updateWorkerProfile(form) {
     updatedAt: serverTimestamp()
   };
   if (editingWorker.inputMode === "managed") values.contactEmail = form.contactEmail;
-  return updateDoc(doc(db, "users", editingWorker.id || editingWorker.uid), values);
+  const workerId = editingWorker.id || editingWorker.uid;
+  const batch = writeBatch(db);
+  batch.update(doc(db, "users", workerId), values);
+  batch.set(doc(db, "shiftCandidateProfiles", workerId), {
+    uid: workerId, employeeNumber: editingWorker.employeeNumber, name: form.name,
+    nearestStation: form.nearestStation, branchId: editingWorker.branchId,
+    accountStatus: editingWorker.accountStatus, updatedAt: serverTimestamp()
+  });
+  return batch.commit();
 }
 
 function appendTextCell(row, value) {
@@ -622,7 +688,7 @@ function renderEmptyState(visible, tableBody, cards, colspan, text) {
 }
 
 function formatTimestamp(value) {
-  const date = value?.toDate?.();
+  const date = value instanceof Date ? value : value?.toDate?.();
   return date ? date.toLocaleString("ja-JP") : "記録なし";
 }
 

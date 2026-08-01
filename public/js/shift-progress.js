@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { ALL_BRANCHES, branchName, effectiveBranchId } from "./branches.js";
 
 let el;
 let navigate;
@@ -126,15 +127,18 @@ async function recordSelfProgress(shift, profile, field, departureTime = "") {
 }
 
 async function loadOfficeProgress() {
-  const branchId = currentRole.branchId;
+  const branchId = effectiveBranchId(currentRole);
+  const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
   const date = el.progressDate.value;
   const shiftType = el.progressShiftType.value;
   el.dailyProgressMessage.textContent = "勤務状況を読み込んでいます。";
   el.dailyProgressMessage.className = "message show";
   try {
     const [shiftSnapshot, usersSnapshot] = await Promise.all([
-      getDocs(query(collection(db, "shiftGroups"), where("branchId", "==", branchId), where("date", "==", date), where("shiftType", "==", shiftType))),
-      getDocs(query(collection(db, "users"), where("branchId", "==", branchId)))
+      getDocs(allBranches
+        ? query(collection(db, "shiftGroups"), where("date", "==", date), where("shiftType", "==", shiftType))
+        : query(collection(db, "shiftGroups"), where("branchId", "==", branchId), where("date", "==", date), where("shiftType", "==", shiftType))),
+      getDocs(allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId)))
     ]);
     const users = new Map(usersSnapshot.docs.map(item => [item.id, { id: item.id, ...item.data() }]));
     officeRows = [];
@@ -163,7 +167,7 @@ function renderOfficeRows() {
   el.dailyProgressCards.replaceChildren();
   rows.forEach(item => {
     const values = [
-      `${item.user.name}\n${item.user.employeeNumber}`,
+      `${item.user.name}\n${item.user.employeeNumber}${currentRole.role === "admin" && effectiveBranchId(currentRole) === ALL_BRANCHES ? `\n${branchName(item.user.branchId)}` : ""}`,
       item.shift.title || "名称未設定",
       item.shift.leaderUid === item.user.id ? "隊長" : "隊員",
       item.progress.departureAcknowledgedAt

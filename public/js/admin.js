@@ -1,5 +1,6 @@
 import { db } from "./firebase-config.js";
 import { collection, doc, getDocs, query, serverTimestamp, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { ALL_BRANCHES, branchName, effectiveBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
 let navigate;
@@ -38,29 +39,42 @@ export async function showAdmin(profile = currentProfile, roleData = currentRole
 }
 
 async function renderAdmin() {
-  const branchId = currentRole.branchId;
+  const branchId = effectiveBranchId(currentRole);
+  const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
+  const isAdminView = currentRole.role === "admin";
   const date = el.adminDate.value;
   el.adminDateLabel.textContent = `${date} の勤務希望`;
-  const usersQuery = query(collection(db, "users"), where("branchId", "==", branchId));
-  const availabilityQuery = query(
-    collection(db, "availability"),
-    where("branchId", "==", branchId),
-    where("date", "==", date)
-  );
-  const rolesQuery = query(collection(db, "userRoles"), where("branchId", "==", branchId));
+  // adminは支社に所属しないため、特定支社表示でも全usersからadminを合流して絞り込む。
+  const usersQuery = isAdminView
+    ? collection(db, "users")
+    : query(collection(db, "users"), where("branchId", "==", branchId));
+  const availabilityQuery = allBranches
+    ? query(collection(db, "availability"), where("date", "==", date))
+    : query(collection(db, "availability"), where("branchId", "==", branchId), where("date", "==", date));
+  const rolesQuery = isAdminView
+    ? collection(db, "userRoles")
+    : query(collection(db, "userRoles"), where("branchId", "==", branchId));
   const [usersSnapshot, availabilitySnapshot, rolesSnapshot] = await Promise.all([
     getDocs(usersQuery),
     getDocs(availabilityQuery),
     getDocs(rolesQuery)
   ]);
-  const roles = new Map(rolesSnapshot.docs.map(d => [d.id, d.data()]));
-  // Firestore document ID is the authoritative Authentication UID.
-  // Ignore a legacy `uid` field inside users documents if one exists.
+  const roles = createRoleLookup(rolesSnapshot);
+  // 新旧データでusersの文書IDとAuthentication UIDが異なる場合も、
+  // authUid / uid / workerIdを使ってuserRolesへ安全に結合する。
   const users = usersSnapshot.docs.map(d => {
     const data = d.data();
-    return { ...data, inputMode: data.inputMode === "managed" ? "managed" : "web", uid: d.id };
+    const roleEntry = findRoleEntry(d.id, data, roles);
+    return {
+      ...data,
+      id: d.id,
+      uid: roleEntry?.id || data.authUid || data.uid || d.id,
+      inputMode: data.inputMode === "managed" ? "managed" : "web",
+      profileAccountStatus: data.accountStatus,
+      roleData: roleEntry?.data || null
+    };
   });
-  const usersByUid = new Map(users.map(user => [user.uid, user]));
+  const usersByUid = createUserLookup(users);
   const usersByEmployeeNumber = new Map(users.map(user => [user.employeeNumber, user]));
   const availability = new Map();
   availabilitySnapshot.docs.forEach(item => {
@@ -74,22 +88,27 @@ async function renderAdmin() {
   });
   const search = el.adminSearch.value.trim().toLowerCase();
   const rows = users.map(user => {
-    const roleData = roles.get(user.uid);
+    // userRolesを優先し、分離前の旧users.role/accountStatusも読み取り互換として扱う。
+    const roleData = user.roleData || user;
+    const formalBranchId = resolveFormalBranchId(user, roleData);
     return {
       ...user,
       role: roleData?.role,
       roleBranchId: roleData?.branchId,
+      branchId: formalBranchId,
       accountStatus: roleData?.accountStatus,
+      disabledAt: roleData?.disabledAt ?? user.disabledAt ?? null,
+      disabledByUid: roleData?.disabledByUid ?? user.disabledByUid ?? "",
       shift: availability.get(user.uid)
     };
   })
-    .filter(user =>
-      user.branchId === branchId &&
-      user.roleBranchId === branchId &&
-      user.accountStatus === "active"
-    )
+    .filter(user => isVisibleAccount(user) &&
+      (allBranches || user.role === "admin" || user.branchId === branchId))
     .filter(user => matchesFilter(user.shift))
-    .filter(user => !search || `${user.employeeNumber} ${user.name} ${user.city}`.toLowerCase().includes(search));
+    .filter(user => !search || `${user.employeeNumber} ${user.name} ${user.city}`.toLowerCase().includes(search))
+    // adminは支社に関係なく常に最後へ表示する。
+    .sort((a, b) => Number(a.role === "admin") - Number(b.role === "admin") ||
+      String(a.employeeNumber || "").localeCompare(String(b.employeeNumber || ""), "ja"));
   el.adminTableBody.replaceChildren();
   el.adminCards.replaceChildren();
   rows.forEach(user => {
@@ -99,10 +118,12 @@ async function renderAdmin() {
     const updateType = ["staff", "proxy"].includes(shift.updatedByType) ? "代理入力" : shift.updatedByType === "self" ? "本人入力" : "記録なし";
     const tr = document.createElement("tr");
     tr.className = "admin-summary-row";
+    tr.dataset.accountId = user.uid || user.id;
     const identityCell = document.createElement("td");
     identityCell.append(
       summaryLine(`警備員番号：${user.employeeNumber}`, "admin-summary-number"),
-      summaryRoleLine(user)
+      summaryRoleLine(user),
+      ...(allBranches ? [summaryLine(`支社：${displayBranchName(user)}`, "admin-summary-branch")] : [])
     );
     const wishCell = document.createElement("td");
     wishCell.append(
@@ -126,9 +147,11 @@ async function renderAdmin() {
     el.adminTableBody.appendChild(tr);
     const card = document.createElement("article");
     card.className = "admin-card";
+    card.dataset.accountId = user.uid || user.id;
     const heading = document.createElement("div");
     heading.className = "admin-card-heading";
     appendRoleName(heading, user);
+    if (allBranches) heading.appendChild(summaryLine(displayBranchName(user), "admin-summary-branch"));
     const details = document.createElement("div");
     details.className = "admin-card-details";
     details.textContent = `${user.employeeNumber}\n${status}\n${updateType}\n${shift.note || "備考なし"}\n` +
@@ -138,6 +161,49 @@ async function renderAdmin() {
     el.adminCards.appendChild(card);
   });
   if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="5">該当する利用者はいません</td></tr>';
+}
+
+function resolveFormalBranchId(user, roleData) {
+  if (roleData?.role === "admin") return null;
+  if (roleData?.branchId || user.branchId) return roleData?.branchId || user.branchId;
+  // 既存guard/staffのbranchId欠落は、旧システムの所属先である国分寺として互換表示する。
+  return ["guard", "staff"].includes(roleData?.role) ? "kokubunji" : null;
+}
+
+function isVisibleAccount(user) {
+  if (!isOperationalAccount(user.accountStatus)) return false;
+  // managedはAuthenticationを持たない正式仕様。webで明示的にauthUidが空のデータだけを無効扱いにする。
+  if (user.inputMode === "web" && Object.hasOwn(user, "authUid") && !user.authUid) return false;
+  return ["guard", "staff", "admin"].includes(user.role);
+}
+
+function createRoleLookup(rolesSnapshot) {
+  const lookup = new Map();
+  rolesSnapshot.docs.forEach(item => {
+    const data = item.data();
+    const entry = { id: item.id, data };
+    [item.id, data.uid, data.authUid, data.workerId].filter(Boolean).forEach(key => lookup.set(key, entry));
+  });
+  return lookup;
+}
+
+function findRoleEntry(documentId, user, roleLookup) {
+  for (const key of [documentId, user.authUid, user.uid, user.workerId]) {
+    if (key && roleLookup.has(key)) return roleLookup.get(key);
+  }
+  return null;
+}
+
+function createUserLookup(users) {
+  const lookup = new Map();
+  users.forEach(user => {
+    [user.id, user.uid, user.authUid, user.workerId].filter(Boolean).forEach(key => lookup.set(key, user));
+  });
+  return lookup;
+}
+
+function displayBranchName(user) {
+  return user.role === "admin" ? "全支社管理（所属なし）" : branchName(user.branchId);
 }
 
 function summaryLine(text, className = "") {
@@ -169,9 +235,10 @@ function roleLabel(role) {
 
 export async function loadStaffRequests() {
   if (!["staff", "admin"].includes(currentRole?.role)) throw new Error("申請を表示する権限がありません。");
-  const requestsQuery = currentRole.role === "admin"
+  const selectedBranch = effectiveBranchId(currentRole);
+  const requestsQuery = currentRole.role === "admin" && selectedBranch === ALL_BRANCHES
     ? collection(db, "staffRequests")
-    : query(collection(db, "staffRequests"), where("branchId", "==", currentRole.branchId));
+    : query(collection(db, "staffRequests"), where("branchId", "==", selectedBranch));
   const snapshot = await getDocs(requestsQuery);
   return snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
 }

@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>警備員勤務希望管理システム | テイシン警備 国分寺支社</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260730-7">
+  <title>警備員勤務希望管理システム | テイシン警備</title>
+  <link rel="stylesheet" href="./css/style.css?v=20260801-2">
 </head>
 <body>
   <main class="app">
     <section id="loginScreen" class="screen active" aria-labelledby="loginTitle">
       <h1 id="loginTitle" class="top-title">勤務希望管理システム</h1>
-      <p class="sub-title">テイシン警備 国分寺支社</p>
+      <p class="sub-title">テイシン警備</p>
       <div id="loginMessage" class="message" role="alert"></div>
 
       <div class="panel">
@@ -36,7 +36,7 @@
 
     <section id="registerScreen" class="screen" aria-labelledby="registerTitle">
       <h1 id="registerTitle" class="top-title">新規会員登録</h1>
-      <p class="lock-note">この登録画面は試作・デモ用です。正式運用では管理者がアカウントを事前登録します。</p>
+      <p class="lock-note">登録後、管理者が内容と所属支社を確認します。承認されるまでは業務画面を利用できません。</p>
       <div id="registerMessage" class="message" role="alert"></div>
       <div class="panel">
         <div class="form-grid">
@@ -49,32 +49,8 @@
             <input id="regName" type="text" autocomplete="name">
           </div>
           <div>
-            <label for="regEmail">メールアドレス</label>
-            <input id="regEmail" type="email" autocomplete="email">
-          </div>
-          <div>
-            <label for="regZip">郵便番号</label>
-            <input id="regZip" type="text" inputmode="numeric" autocomplete="postal-code">
-          </div>
-          <div>
-            <label for="regPref">都道府県</label>
-            <input id="regPref" type="text" autocomplete="address-level1">
-          </div>
-          <div>
-            <label for="regCity">市区町村</label>
-            <input id="regCity" type="text" autocomplete="address-level2">
-          </div>
-          <div>
-            <label for="regStreet">町名・番地</label>
-            <input id="regStreet" type="text" autocomplete="address-line1">
-          </div>
-          <div>
-            <label for="regBuilding">建物名・部屋番号</label>
-            <input id="regBuilding" type="text" autocomplete="address-line2">
-          </div>
-          <div>
-            <label for="regNearestStation">最寄り駅</label>
-            <input id="regNearestStation" type="text">
+            <label for="regRequestedBranch">希望所属支社</label>
+            <select id="regRequestedBranch"></select>
           </div>
           <div>
             <label for="regPassword">パスワード</label>
@@ -83,14 +59,6 @@
           <div>
             <label for="regPasswordConfirm">パスワード確認</label>
             <input id="regPasswordConfirm" type="password" autocomplete="new-password">
-          </div>
-        </div>
-        <div class="staff-request-option">
-          <label class="checkbox-label"><input id="regStaffRequested" type="checkbox"> 内勤者登録を希望する</label>
-          <p class="small-text">通常警備員は記入する必要はありません。</p>
-          <div id="staffRequestFields" class="form-grid" hidden>
-            <div><label for="regStaffName">氏名</label><input id="regStaffName" type="text"></div>
-            <div><label for="regStaffBranch">所属支社</label><input id="regStaffBranch" type="text" value="kokubunji"></div>
           </div>
         </div>
         <div class="actions">
@@ -214,6 +182,23 @@
       <div id="adminCards" class="admin-cards"></div>
     </section>
 
+    <section id="pendingApprovalScreen" class="screen" aria-labelledby="pendingApprovalTitle">
+      <h1 id="pendingApprovalTitle" class="top-title">アカウント承認待ち</h1>
+      <div class="panel pending-approval-panel">
+        <p>現在アカウント承認待ちです。管理者の承認後に利用できます。</p>
+        <button id="pendingLogoutButton" class="secondary" type="button">ログアウト</button>
+      </div>
+    </section>
+
+    <section id="rejectedAccountScreen" class="screen" aria-labelledby="rejectedAccountTitle">
+      <h1 id="rejectedAccountTitle" class="top-title">アカウントを利用できません</h1>
+      <div class="panel pending-approval-panel">
+        <p>登録申請が却下されました。詳しくは管理者へお問い合わせください。</p>
+        <div id="rejectedAccountReason" class="message show error"></div>
+        <button id="rejectedLogoutButton" class="secondary" type="button">ログアウト</button>
+      </div>
+    </section>
+
     <section id="ownShiftsScreen" class="screen" aria-labelledby="ownShiftsTitle">
       <div class="header">
         <div>
@@ -274,6 +259,16 @@
       </div>
       <div id="staffRequestsMessage" class="message" role="alert"></div>
       <div id="staffRequestsList" class="request-list"></div>
+    </section>
+
+    <section id="accountApprovalsScreen" class="screen" aria-labelledby="accountApprovalsTitle">
+      <div class="header"><div><h1 id="accountApprovalsTitle">新規アカウント承認</h1><div class="user-line">承認後に正式所属支社が設定されます</div></div>
+        <button id="accountApprovalsMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="accountApprovalsMessage" class="message" role="alert"></div>
+      <div class="desktop-table"><table><thead><tr><th>氏名</th><th>警備員番号</th><th>希望支社</th><th>登録日時</th><th>正式所属支社</th><th>操作</th></tr></thead>
+        <tbody id="accountApprovalsTableBody"></tbody></table></div>
+      <div id="accountApprovalsCards" class="request-list mobile-only-list"></div>
     </section>
 
     <section id="guardManagementScreen" class="screen" aria-labelledby="guardManagementTitle">
@@ -342,6 +337,9 @@
         <button id="shiftTypeDay" type="button" class="active">日勤</button>
         <button id="shiftTypeNight" class="secondary" type="button">夜勤</button>
       </div>
+      <label id="otherBranchCandidatesOption" class="checkbox-label panel compact-option" hidden>
+        <input id="showOtherBranchCandidates" type="checkbox"> 他支社の配置可能な警備員も表示
+      </label>
       <div id="shiftBuilderMessage" class="message" role="alert"></div>
       <div id="shiftGroupsList" class="shift-groups"></div>
       <button id="newShiftGroupButton" class="wide-action" type="button">＋ 新しいグループを作成</button>
@@ -377,9 +375,30 @@
       <button id="menuCalendarButton" type="button">自分の勤務希望</button>
       <button id="menuOwnShiftsButton" type="button">自分のシフト</button>
       <button id="menuDailyProgressButton" type="button">当日の勤務状況</button>
-      <button id="menuRequestsButton" type="button">内勤者申請</button>
+      <div id="applicationsMenuGroup" class="side-menu-group">
+        <strong>各種申請</strong>
+        <button id="menuRequestsButton" type="button">内勤者申請</button>
+        <button id="menuAccountApprovalsButton" type="button">新規アカウント承認</button>
+      </div>
+      <label id="adminBranchSwitchWrap" class="side-menu-select" hidden>支社切替
+        <select id="adminBranchSwitch"></select>
+      </label>
       <button id="menuLogoutButton" class="secondary" type="button">ログアウト</button>
     </nav>
+  </div>
+
+  <div id="accountRejectionModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="accountRejectionTitle">
+    <div class="modal compact-action-modal">
+      <h2 id="accountRejectionTitle">新規アカウントを却下します</h2>
+      <p id="accountRejectionTarget"></p>
+      <label for="accountRejectionReason">却下理由（必須）</label>
+      <textarea id="accountRejectionReason" maxlength="200" placeholder="例：警備員番号が確認できません"></textarea>
+      <div id="accountRejectionMessage" class="message" role="alert"></div>
+      <div class="actions">
+        <button id="cancelAccountRejectionButton" class="secondary" type="button">キャンセル</button>
+        <button id="confirmAccountRejectionButton" class="danger" type="button">却下する</button>
+      </div>
+    </div>
   </div>
 
   <div id="shiftGroupModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shiftGroupModalTitle">
@@ -391,6 +410,13 @@
           <button id="confirmShiftTopButton" type="button">シフトを確定する</button>
           <button id="closeShiftGroupTopButton" class="neutral" type="button">変更せず戻る</button>
         </div>
+      </div>
+      <div id="shiftGroupBranchWrap" class="shift-branch-selector" hidden>
+        <label for="shiftGroupBranch">作成先支社（必須）</label>
+        <select id="shiftGroupBranch">
+          <option value="">作成先支社を選択してください</option>
+        </select>
+        <p class="small-text">選択した支社のシフトとして保存されます。</p>
       </div>
       <div class="member-section-heading">
         <h3>1. メンバーを追加</h3>
@@ -638,6 +664,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260730-7"></script>
+  <script type="module" src="./js/app.js?v=20260801-9"></script>
 </body>
 </html>

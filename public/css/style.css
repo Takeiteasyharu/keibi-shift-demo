@@ -493,7 +493,39 @@
 .menu-button { min-width:64px; font-size:2rem; padding:8px 18px; }
 .side-menu-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; z-index:1000; }
 .side-menu-backdrop.show { display:block; }
-.side-menu { position:absolute; right:0; top:0; width:min(86vw,380px); height:100%; background:#fff; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:-8px 0 24px rgba(0,0,0,.2); }
+body.side-menu-open { overflow:hidden; }
+.side-menu {
+  position:absolute;
+  right:0;
+  top:0;
+  width:min(86vw,380px);
+  height:100vh;
+  height:100dvh;
+  max-height:100vh;
+  max-height:100dvh;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  background:#fff;
+  padding:calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) 24px;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  box-shadow:-8px 0 24px rgba(0,0,0,.2);
+  box-sizing:border-box;
+}
+.side-menu-group { display:grid; gap:10px; border-top:2px solid #cbd5e1; padding-top:14px; }
+.side-menu-group > strong { font-size:20px; color:#163c27; }
+.side-menu-select { display:grid; gap:8px; font-size:20px; font-weight:800; }
+.side-menu-select select { min-height:54px; font-size:20px; }
+.pending-approval-panel { max-width:760px; margin:40px auto; text-align:center; font-size:24px; }
+.compact-option { margin:14px 0; padding:14px 18px; }
+.shift-branch-selector { margin:0 0 20px; padding:18px; border:3px solid var(--brand); border-radius:12px; background:#f0fdf4; }
+.shift-branch-selector label { display:block; margin-bottom:8px; font-size:22px; font-weight:900; }
+.shift-branch-selector select { width:100%; min-height:58px; font-size:21px; }
+.account-approval-card { white-space:pre-line; display:grid; gap:14px; }
+.account-approval-card select { width:100%; margin-top:8px; }
+.mobile-only-list { display:none; }
 .side-menu button { width:100%; min-height:58px; font-size:1.1rem; }
 .request-list { display:grid; gap:16px; }
 .request-card { background:#fff; border:2px solid var(--line); border-radius:14px; padding:20px; font-size:1.08rem; line-height:1.7; }
@@ -805,6 +837,8 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
 input[readonly] { background:#e5e7eb; color:#374151; cursor:not-allowed; }
 @media (max-width:1000px) and (min-width:761px) { .shift-groups { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:760px) {
+  .mobile-only-list { display:grid; }
+  #accountApprovalsScreen .desktop-table { display:none; }
   .integrated-management-actions { grid-template-columns:1fr; }
   .integrated-management-actions .small-text { grid-column:auto; }
   .shift-toolbar { flex-direction:column; align-items:stretch; }

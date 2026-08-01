@@ -1,6 +1,22 @@
 {
   "indexes": [
     {
+      "collectionGroup": "shiftCandidateAssignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "shiftType", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shiftGroups",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "date", "order": "ASCENDING" },
+        { "fieldPath": "shiftType", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "shiftGroups",
       "queryScope": "COLLECTION",
       "fields": [
