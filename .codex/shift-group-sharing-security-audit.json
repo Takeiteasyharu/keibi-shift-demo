@@ -1,0 +1,19 @@
+{
+  "score": 5,
+  "summary": "The shiftGroups sharing rules use trusted userRoles data for authority, keep branch and creator identity immutable, validate create and update with the same schema validator, and prevent guard writes. Static red-team review found no authorization bypass in the scoped changes.",
+  "findings": [],
+  "attack_results": [
+    {"attack": "unauthenticated read/write", "result": "denied by isActive/isOffice"},
+    {"attack": "guard create/update/delete", "result": "denied because guard is not isOffice"},
+    {"attack": "staff read or write another branch", "result": "denied by branch-scoped query/read and isSameBranch"},
+    {"attack": "staff changes branchId during update", "result": "denied by equality and immutable-field checks"},
+    {"attack": "staff changes creator identity or createdAt", "result": "denied by immutable-field checks"},
+    {"attack": "staff spoofs updatedByUid", "result": "denied because it must equal request.auth.uid"},
+    {"attack": "staff spoofs updatedByName", "result": "denied because it must equal users/request.auth.uid.name"},
+    {"attack": "schema pollution or oversized strings", "result": "denied by hasOnly and isValidShiftGroup length/type checks"},
+    {"attack": "invalid status or timestamp", "result": "denied by enum checks and request.time validation"},
+    {"attack": "admin all-branch query", "result": "allowed as required; admin authority comes from userRoles"},
+    {"attack": "staff same-branch collaborator update", "result": "allowed as required while creator and branch remain immutable"}
+  ],
+  "validation_note": "JavaScript syntax and git diff checks passed. Firebase CLI dry-run timed out without output, and emulator execution is unavailable because Java is not installed. Rules require deployment-time syntax validation before production release."
+}

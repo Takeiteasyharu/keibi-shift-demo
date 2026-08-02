@@ -1,0 +1,30 @@
+{
+  "score": 5,
+  "summary": "guard本人の同一支社書込みだけを有効化し、所有者照合、状態、支社、厳格スキーマ、監査フィールド、関連候補データの整合性を維持している。",
+  "findings": [
+    {
+      "check": "Unauthorized write",
+      "severity": "minor",
+      "issue": "guard本人はdata.uidとrequest.auth.uidが一致する場合だけ許可され、他人UIDは拒否される。",
+      "recommendation": "isSelfAvailabilityの所有者条件を維持する。"
+    },
+    {
+      "check": "Branch boundary",
+      "severity": "minor",
+      "issue": "guard/staffはmyRole.branchIdと保存branchIdの一致が必要で、adminだけが全支社を扱える。",
+      "recommendation": "支社条件をoffice専用isSameBranchへ戻さない。"
+    },
+    {
+      "check": "Update bypass and schema pollution",
+      "severity": "minor",
+      "issue": "create/updateともisValidAvailabilityを通り、updateではuid、branchId、date、createdAtが固定される。",
+      "recommendation": "既存のhasOnly、型、長さ、immutable条件を維持する。"
+    },
+    {
+      "check": "Proxy privilege",
+      "severity": "minor",
+      "issue": "代理入力はstaff/admin、同支社、監査理由、対象ユーザーの運用状態を引き続き要求する。",
+      "recommendation": "isManagedAvailabilityとhasValidProxyAuditを維持する。"
+    }
+  ]
+}

@@ -10,7 +10,8 @@
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "set-claims": "tsx scripts/set-claims.ts",
-    "migrate-existing": "tsx scripts/migrate-existing.ts"
+    "migrate-existing": "tsx scripts/migrate-existing.ts",
+    "repair-016939": "tsx scripts/repair-employee-016939.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.2.0",

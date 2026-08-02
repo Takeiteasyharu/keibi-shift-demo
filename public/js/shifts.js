@@ -1,5 +1,5 @@
 import { db } from "./firebase-config.js";
-import { addDoc, collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { ALL_BRANCHES, BRANCHES, branchName, effectiveBranchId, isBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
@@ -18,6 +18,15 @@ let confirmationResolve = null;
 let notifyUser = () => {};
 const recentlyDuplicatedIds = new Set();
 let memberProfilesBackfilled = false;
+let stopGroupsObserver = null;
+let groupsObserverVersion = 0;
+
+export function stopShiftGroupObserver() {
+  groupsObserverVersion += 1;
+  stopGroupsObserver?.();
+  stopGroupsObserver = null;
+  groups = [];
+}
 
 export async function loadOwnConfirmedShifts(uid, branchId) {
   const base = collection(db, "shiftGroups");
@@ -153,7 +162,12 @@ function setType(value) {
 
 async function renderGroups() {
   if (!currentRole) return;
+  stopGroupsObserver?.();
+  stopGroupsObserver = null;
+  const observerVersion = ++groupsObserverVersion;
   closeCardMenu();
+  groups = [];
+  el.shiftGroupsList.innerHTML = '<div class="panel">シフトグループを読み込んでいます。</div>';
   const branchId = effectiveBranchId(currentRole);
   const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
   el.newShiftGroupButton.disabled = false;
@@ -163,12 +177,24 @@ async function renderGroups() {
     ? query(collection(db, "shiftGroups"), where("date", "==", el.shiftBuilderDate.value), where("shiftType", "==", type()))
     : query(collection(db, "shiftGroups"), where("branchId", "==", branchId),
       where("date", "==", el.shiftBuilderDate.value), where("shiftType", "==", type()));
-  const [groupSnapshot, profileSnapshot] = await Promise.all([
-    getDocs(groupQuery),
-    getDocs(allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId)))
-  ]);
-  groups = groupSnapshot.docs.map(item => normalizeGroup({ id: item.id, ...item.data() }));
+  const profileSnapshot = await getDocs(
+    allBranches ? collection(db, "users") : query(collection(db, "users"), where("branchId", "==", branchId))
+  );
+  if (observerVersion !== groupsObserverVersion) return;
   profileNames = new Map(profileSnapshot.docs.map(item => [item.id, item.data().name]));
+  stopGroupsObserver = onSnapshot(groupQuery, groupSnapshot => {
+    if (observerVersion !== groupsObserverVersion) return;
+    groups = groupSnapshot.docs.map(item => normalizeGroup({ id: item.id, ...item.data() }));
+    renderGroupCards(allBranches);
+  }, error => {
+    if (observerVersion !== groupsObserverVersion) return;
+    console.error("シフトグループのリアルタイム取得に失敗しました", error);
+    el.shiftGroupsList.innerHTML = '<div class="message show error">シフトグループを読み込めませんでした。</div>';
+  });
+}
+
+function renderGroupCards(allBranches) {
+  closeCardMenu();
   el.shiftGroupsList.replaceChildren();
 
   groups.forEach(group => {
@@ -191,6 +217,8 @@ async function renderGroups() {
       <div>勤務開始：${safe(displayStartTime(group.startTime) || "開始時刻未入力")}</div>
       <div>隊長：${safe(group.leaderUid ? nameOf(group.leaderUid) : "未選択")}　配置人数：${group.memberUids.length}人</div>
       <div>備考：${safe(group.note || "なし")}</div>
+      <div class="shift-card-audit"><b>作成者：</b>${safe(group.createdByName || nameOf(group.createdBy) || group.createdBy || "不明")}</div>
+      <div class="shift-card-audit"><b>最終更新：</b>${safe(group.updatedByName || nameOf(group.updatedByUid) || "不明")}　${safe(formatUpdatedAt(group.updatedAt))}</div>
       ${issues.length ? `<div class="incomplete-summary"><strong>未入力項目があります</strong><ul>${visibleIssues.map(issue => `<li>${safe(issue)}</li>`).join("")}</ul>${remaining > 0 ? `<div>ほか${remaining}件</div>` : ""}</div>` : ""}
     `;
     const cardControls = card.querySelector(".group-card-controls");
@@ -283,6 +311,8 @@ async function changeShiftType(group, targetType) {
   if (!await confirmOperation(message, "変更する")) return;
   await updateDoc(doc(db, "shiftGroups", group.id), {
     shiftType: targetType,
+    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
     updatedAt: serverTimestamp()
   });
   await syncShiftCandidateAssignments(group.id, { ...group, shiftType: targetType });
@@ -353,6 +383,8 @@ async function changeGroupDate(group, targetDate) {
   if (!await confirmOperation(message, "変更する")) return;
   await updateDoc(doc(db, "shiftGroups", group.id), {
     date: targetDate,
+    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
     updatedAt: serverTimestamp()
   });
   await syncShiftCandidateAssignments(group.id, { ...group, date: targetDate });
@@ -373,6 +405,9 @@ async function duplicateGroup(group, targetDate) {
     date: targetDate,
     status: "draft",
     createdBy: currentProfile.uid,
+    createdByName: currentProfile.name,
+    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   };
@@ -386,7 +421,7 @@ async function duplicateGroup(group, targetDate) {
 }
 
 function copyShiftContent(group) {
-  const managementFields = new Set(["id", "status", "createdAt", "updatedAt", "createdBy"]);
+  const managementFields = new Set(["id", "status", "createdAt", "updatedAt", "createdBy", "createdByName", "updatedByUid", "updatedByName"]);
   const content = Object.fromEntries(
     Object.entries(group).filter(([key]) => !managementFields.has(key))
   );
@@ -769,10 +804,18 @@ async function saveGroup(status, notify) {
 
   const shiftRef = editingId ? doc(db, "shiftGroups", editingId) : doc(collection(db, "shiftGroups"));
   const batch = writeBatch(db);
-  if (editingId) batch.update(shiftRef, { ...data, updatedAt: serverTimestamp() });
+  if (editingId) batch.update(shiftRef, {
+    ...data,
+    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
+    updatedAt: serverTimestamp()
+  });
   else batch.set(shiftRef, {
     ...data,
     createdBy: currentProfile.uid,
+    createdByName: currentProfile.name,
+    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
@@ -901,6 +944,14 @@ function moveDay(amount) {
 
 function localKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatUpdatedAt(value) {
+  const date = value?.toDate?.();
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "更新日時を取得中";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+  }).format(date);
 }
 
 function normalizeStartTime(value, defaultHour) {

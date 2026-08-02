@@ -1,4 +1,6 @@
-import { getAvailability, saveAvailability } from "./availability.js?v=20260730-2";
+import { auth } from "./firebase-config.js";
+import { getAvailability, saveAvailability } from "./availability.js?v=20260803-6";
+import { loadOwnConfirmedShifts } from "./shifts.js?v=20260803-1";
 
 const HOLIDAYS_2026 = {
   "2026-01-01": "元日", "2026-01-12": "成人の日", "2026-02-11": "建国記念の日",
@@ -26,6 +28,7 @@ const state = {
   operatorRole: "",
   inputMode: "web",
   pendingSave: null,
+  saving: false,
   returnAction: null
 };
 let el;
@@ -36,13 +39,39 @@ export function setConfirmedShifts(items = []) {
   confirmedByDate = new Map(items.map(item => [item.date, item]));
 }
 
+export function resetCalendarState() {
+  state.viewDate = new Date();
+  state.selectedDate = "";
+  state.draft = emptyAvailability();
+  state.profile = null;
+  state.proxy = false;
+  state.operatorUid = "";
+  state.operatorRole = "";
+  state.inputMode = "web";
+  state.pendingSave = null;
+  state.saving = false;
+  state.returnAction = null;
+  confirmedByDate = new Map();
+  if (!el) return;
+  el.calendarGrid.replaceChildren();
+  el.currentUserName.textContent = "";
+  el.currentUserId.textContent = "";
+  el.proxyInputBanner.hidden = true;
+  el.proxyInputEmployeeNumber.textContent = "";
+  el.proxyInputName.textContent = "";
+  el.proxyInputMode.textContent = "";
+  el.shiftModalBackdrop.classList.remove("show");
+  el.proxyReasonModal.classList.remove("show");
+  el.shiftNote.value = "";
+}
+
 export function initCalendar(elements, showToast) {
   el = elements;
   notify = showToast;
   el.prevMonthButton.addEventListener("click", () => moveMonth(-1));
   el.nextMonthButton.addEventListener("click", () => moveMonth(1));
   el.todayButton.addEventListener("click", () => { state.viewDate = new Date(); renderCalendar(); });
-  el.closeShiftButton.addEventListener("click", closeModal);
+  el.closeShiftButton.addEventListener("click", () => closeModal());
   el.shiftModalBackdrop.addEventListener("click", event => {
     if (event.target === el.shiftModalBackdrop) closeModal();
   });
@@ -68,12 +97,20 @@ export function initCalendar(elements, showToast) {
 }
 
 export function showCalendar(profile, options = {}) {
-  state.profile = profile;
-  state.proxy = Boolean(options.proxy);
-  state.operatorUid = options.operatorUid || profile.uid;
+  const proxy = Boolean(options.proxy);
+  const authUid = auth.currentUser?.uid || "";
+  const targetUid = proxy ? profile.uid : authUid;
+  if (!targetUid || (!proxy && profile.uid !== authUid)) {
+    resetCalendarState();
+    throw new Error("認証ユーザーと勤務希望の表示対象が一致しません。");
+  }
+  state.profile = { ...profile, uid: targetUid };
+  state.proxy = proxy;
+  state.operatorUid = proxy ? options.operatorUid : authUid;
   state.operatorRole = options.operatorRole || "";
   state.inputMode = options.inputMode || profile.inputMode || "web";
   state.pendingSave = null;
+  state.saving = false;
   state.returnAction = options.returnAction || null;
   state.viewDate = new Date();
   el.currentUserName.textContent = profile.name;
@@ -92,6 +129,8 @@ export function showCalendar(profile, options = {}) {
 
 export function renderCalendar() {
   if (!el || !state.profile) return;
+  const targetUid = calendarTargetUid();
+  if (!targetUid) return;
   const year = state.viewDate.getFullYear();
   const month = state.viewDate.getMonth();
   el.monthLabel.textContent = `${year}年${month + 1}月`;
@@ -108,6 +147,7 @@ export function renderCalendar() {
   for (let day = 1; day <= last.getDate(); day += 1) {
     const date = new Date(year, month, day);
     const dateKey = toDateKey(date);
+    const confirmed = confirmedByDate.get(dateKey);
     const cell = document.createElement("div");
     cell.className = "day-cell";
     if (date.getDay() === 0 || HOLIDAYS_2026[dateKey]) cell.classList.add("sunday");
@@ -117,6 +157,10 @@ export function renderCalendar() {
     button.type = "button";
     button.className = "day-button";
     button.setAttribute("aria-label", `${formatDateLong(dateKey)}の勤務希望を編集`);
+    if (!state.proxy && confirmed) {
+      button.classList.add("confirmed-viewable");
+      button.setAttribute("aria-label", `${formatDateLong(dateKey)}はシフト確定済みです。勤務希望の内容を確認できます`);
+    }
     button.addEventListener("click", () => openModal(dateKey));
 
     const dateNumber = document.createElement("span");
@@ -130,8 +174,7 @@ export function renderCalendar() {
       button.appendChild(holiday);
     }
 
-    const confirmed = confirmedByDate.get(dateKey);
-    const status = confirmed ? { key: "confirmed", label: "確定" } : getStatus(getAvailability(dateKey));
+    const status = confirmed ? { key: "confirmed", label: "確定" } : getStatus(getAvailability(dateKey, targetUid));
     const chip = document.createElement("span");
     chip.className = `status-chip status-${status.key}`;
     chip.textContent = status.label;
@@ -150,31 +193,41 @@ export function renderCalendar() {
 }
 
 function openModal(dateKey) {
+  if (state.saving) return;
+  const targetUid = calendarTargetUid();
+  if (!targetUid) return;
   state.selectedDate = dateKey;
-  state.draft = normalizeAvailability(getAvailability(dateKey));
+  state.draft = normalizeAvailability(getAvailability(dateKey, targetUid));
   el.modalTitle.textContent = `${formatDateLong(dateKey)}の勤務希望`;
   const confirmed = confirmedByDate.get(dateKey);
+  const confirmedReadOnly = !state.proxy && Boolean(confirmed);
   el.confirmedShiftDetails.hidden = !confirmed;
   if (confirmed) el.confirmedShiftDetails.textContent = `${confirmed.title}\n${confirmed.clientName}\n${confirmed.address}\n集合：${confirmed.meetingPlace || "―"} ${confirmed.meetingTime}\n勤務：${confirmed.startTime}～${confirmed.endTime}\n役割：${confirmed.leaderUid === state.profile.uid ? "隊長" : "隊員"}`;
   el.shiftNote.value = state.draft.note;
   const lock = getLockState(dateKey);
   const past = isPastDate(dateKey);
   const afterDeadline = past || lock.dayLocked || lock.nightLocked;
-  el.modalLockNote.hidden = state.proxy ? !afterDeadline : !afterDeadline;
-  el.modalLockNote.textContent = state.proxy && afterDeadline
+  el.modalLockNote.hidden = confirmedReadOnly ? false : !afterDeadline;
+  el.modalLockNote.textContent = confirmedReadOnly
+    ? "シフト確定済みです。登録した勤務希望は確認できますが、変更はできません。"
+    : state.proxy && afterDeadline
     ? "締切後の変更です。保存前に確認します。"
     : past ? "過去の日付は変更できません。" : lockMessageFull(lock);
-  el.shiftNote.disabled = !state.proxy && (past || (lock.dayLocked && lock.nightLocked));
-  el.saveShiftButton.disabled = !state.proxy && (past || (lock.dayLocked && lock.nightLocked));
+  el.shiftNote.disabled = confirmedReadOnly || (!state.proxy && (past || (lock.dayLocked && lock.nightLocked)));
+  el.saveShiftButton.disabled = state.saving || confirmedReadOnly || (!state.proxy && (past || (lock.dayLocked && lock.nightLocked)));
+  el.closeShiftButton.disabled = state.saving;
+  el.saveShiftButton.textContent = confirmedReadOnly ? "確定済み（変更できません）" : "保存する";
   updateChoiceButtons();
   el.shiftModalBackdrop.classList.add("show");
 }
 
-function closeModal() {
+function closeModal(force = false) {
+  if (state.saving && !force) return;
   el.shiftModalBackdrop.classList.remove("show");
 }
 
 function toggleDraft(kind) {
+  if (!state.proxy && confirmedByDate.has(state.selectedDate)) return;
   const lock = getLockState(state.selectedDate);
   if (!state.proxy && isPastDate(state.selectedDate)) return;
   if (!state.proxy && ((kind === "day" && lock.dayLocked) || (kind === "night" && lock.nightLocked))) return;
@@ -195,6 +248,7 @@ function toggleDraft(kind) {
 function updateChoiceButtons() {
   const lock = getLockState(state.selectedDate);
   const past = isPastDate(state.selectedDate);
+  const confirmedReadOnly = !state.proxy && confirmedByDate.has(state.selectedDate);
   const pairs = [
     [el.choiceDay, "day", !state.proxy && (past || lock.dayLocked)],
     [el.choiceNight, "night", !state.proxy && (past || lock.nightLocked)],
@@ -204,13 +258,19 @@ function updateChoiceButtons() {
   pairs.forEach(([button, key, disabled]) => {
     button.classList.toggle("selected", state.draft[key]);
     button.setAttribute("aria-pressed", String(state.draft[key]));
-    button.disabled = disabled;
+    button.disabled = state.saving || confirmedReadOnly || disabled;
   });
   el.choiceDay.textContent = !state.proxy && lock.dayLocked ? "日勤 締切済み" : "日勤を希望する";
   el.choiceNight.textContent = !state.proxy && lock.nightLocked ? "夜勤 締切済み" : "夜勤を希望する";
 }
 
 async function save() {
+  if (state.saving) return;
+  if (!state.proxy && confirmedByDate.has(state.selectedDate)) {
+    closeModal();
+    notify("シフト確定済みの日は勤務希望を変更できません。");
+    return;
+  }
   const lock = getLockState(state.selectedDate);
   const afterDeadline = isPastDate(state.selectedDate) || lock.dayLocked || lock.nightLocked;
   if (!state.proxy && (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked))) return;
@@ -233,28 +293,120 @@ async function save() {
 }
 
 async function performSave(next, afterDeadline, reason = "", reasonNote = "") {
+  if (state.saving) return;
+  const authUid = auth.currentUser?.uid || "";
+  const context = {
+    proxy: state.proxy,
+    authUid,
+    targetUid: state.proxy ? state.profile?.uid || "" : authUid,
+    selectedDate: state.selectedDate,
+    branchId: state.profile?.branchId || "",
+    operatorUid: state.proxy ? state.operatorUid : authUid,
+    operatorRole: state.operatorRole,
+    profileName: state.profile?.name || ""
+  };
+  state.saving = true;
   el.saveShiftButton.disabled = true;
+  el.closeShiftButton.disabled = true;
   el.confirmProxySaveButton.disabled = true;
+  updateChoiceButtons();
   try {
-    await saveAvailability(state.profile.uid, state.selectedDate, next, state.profile.branchId, {
-      updatedByUid: state.operatorUid,
-      updatedByType: state.proxy ? "proxy" : "self",
-      updatedByRole: state.proxy ? state.operatorRole : "",
-      updateReason: state.proxy ? reason : "",
-      updateReasonNote: state.proxy ? reasonNote : "",
-      updatedAfterDeadline: state.proxy && afterDeadline
+    if (!context.proxy && confirmedByDate.has(context.selectedDate)) {
+      const error = new Error("シフト確定済みの日は勤務希望を変更できません。");
+      error.code = "availability/confirmed-shift";
+      throw error;
+    }
+    if (!context.targetUid || !context.authUid || auth.currentUser?.uid !== context.authUid
+        || (!context.proxy && state.profile?.uid !== context.authUid)) {
+      const error = new Error("認証ユーザーと保存対象が一致しません。");
+      error.code = "availability/owner-mismatch";
+      throw error;
+    }
+    if (!context.proxy) {
+      const latestConfirmedShifts = await loadOwnConfirmedShifts(context.targetUid, context.branchId);
+      if (auth.currentUser?.uid !== context.authUid) {
+        const error = new Error("保存中に認証ユーザーが変更されました。");
+        error.code = "availability/owner-mismatch";
+        throw error;
+      }
+      setConfirmedShifts(latestConfirmedShifts);
+      if (confirmedByDate.has(context.selectedDate)) {
+        renderCalendar();
+        const error = new Error("シフト確定済みの日は勤務希望を変更できません。");
+        error.code = "availability/confirmed-shift";
+        throw error;
+      }
+    }
+    await saveAvailability(context.targetUid, context.selectedDate, next, context.branchId, {
+      updatedByUid: context.operatorUid,
+      updatedByType: context.proxy ? "proxy" : "self",
+      updatedByRole: context.proxy ? context.operatorRole : "",
+      updateReason: context.proxy ? reason : "",
+      updateReasonNote: context.proxy ? reasonNote : "",
+      updatedAfterDeadline: context.proxy && afterDeadline
     });
     closeProxyReasonModal();
-    closeModal();
+    state.saving = false;
+    closeModal(true);
     renderCalendar();
-    notify(state.proxy ? `${state.profile.name}さんの勤務希望を代理入力しました。` : "勤務希望を保存しました。");
+    notify(context.proxy ? `${context.profileName}さんの勤務希望を代理入力しました。` : "勤務希望を保存しました。");
   } catch (error) {
-    console.error(error);
-    notify("保存できませんでした。通信状態を確認してください。");
+    if (state.selectedDate === context.selectedDate && calendarTargetUid() === context.targetUid) {
+      state.draft = normalizeAvailability(getAvailability(context.selectedDate, context.targetUid));
+      el.shiftNote.value = state.draft.note;
+      renderCalendar();
+    }
+    console.error("勤務希望の保存に失敗しました", {
+      code: error?.code,
+      message: error?.message,
+      authUid: auth.currentUser?.uid || "",
+      targetUid: context.targetUid,
+      date: context.selectedDate,
+      values: next,
+      inputMode: context.proxy ? "proxy" : "self",
+      selectedProxyUid: context.proxy ? context.targetUid : ""
+    });
+    notify(availabilitySaveErrorMessage(error));
   } finally {
+    state.saving = false;
     el.saveShiftButton.disabled = false;
+    el.closeShiftButton.disabled = false;
     el.confirmProxySaveButton.disabled = false;
+    if (el.shiftModalBackdrop.classList.contains("show")) {
+      updateChoiceButtons();
+      const confirmedReadOnly = !state.proxy && confirmedByDate.has(state.selectedDate);
+      const lock = getLockState(state.selectedDate);
+      const pastOrFullyLocked = !state.proxy && (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked));
+      el.saveShiftButton.disabled = confirmedReadOnly || pastOrFullyLocked;
+      el.closeShiftButton.disabled = false;
+    }
   }
+}
+
+function availabilitySaveErrorMessage(error) {
+  const code = String(error?.code || "").replace("firestore/", "");
+  if (code === "availability/owner-mismatch") {
+    return "ログイン情報が切り替わりました。勤務希望画面を開き直してください。";
+  }
+  if (code === "availability/confirmed-shift") {
+    return "シフト確定済みの日は勤務希望を変更できません。";
+  }
+  if (code === "permission-denied") {
+    return "このアカウントでは勤務希望を保存する権限が確認できません。管理者にお問い合わせください。";
+  }
+  if (code === "not-found") {
+    return "アカウント情報が見つかりません。管理者にお問い合わせください。";
+  }
+  if (["unavailable", "deadline-exceeded", "network-request-failed"].includes(code)) {
+    return "通信に失敗しました。通信状況を確認して再度お試しください。";
+  }
+  return "勤務希望を保存できませんでした。時間をおいて再度お試しください。";
+}
+
+function calendarTargetUid() {
+  if (state.proxy) return state.profile?.uid || "";
+  const authUid = auth.currentUser?.uid || "";
+  return state.profile?.uid === authUid ? authUid : "";
 }
 
 function sameAvailability(left, right) {

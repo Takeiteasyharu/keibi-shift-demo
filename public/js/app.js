@@ -1,8 +1,8 @@
 import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-5";
-import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260801-1";
-import { initCalendar, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260730-2";
+import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260803-6";
+import { initCalendar, resetCalendarState, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260803-9";
 import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-11";
-import { initShifts, loadOwnConfirmedShifts } from "./shifts.js?v=20260801-2";
+import { initShifts, loadOwnConfirmedShifts, stopShiftGroupObserver } from "./shifts.js?v=20260803-1";
 import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-5";
 import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260801-1";
 import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260801-1";
@@ -18,6 +18,8 @@ let stopRoleObserver;
 let registrationInProgress = false;
 let showShiftBuilder;
 let pendingWebProxyResolve;
+let authSessionVersion = 0;
+let activeAuthUid = "";
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
@@ -107,7 +109,18 @@ function bindEvents() {
     await showDailyProgress(profile, roleData);
   });
   el.menuCalendarButton.addEventListener("click", async () => {
-    closeMenu(); await loadOwnAvailability(profile.uid); showScreen("calendar"); showCalendar(profile);
+    closeMenu();
+    const expectedProfile = profile;
+    const expectedVersion = authSessionVersion;
+    if (!expectedProfile || !isCurrentAuthSession(expectedProfile.uid, expectedVersion)) return;
+    resetCalendarState();
+    const loaded = await loadOwnAvailability(expectedProfile.uid);
+    if (!loaded || !isCurrentAuthSession(expectedProfile.uid, expectedVersion)) return;
+    const confirmedShifts = await loadOwnConfirmedShifts(expectedProfile.uid, expectedProfile.branchId);
+    if (!isCurrentAuthSession(expectedProfile.uid, expectedVersion)) return;
+    setConfirmedShifts(confirmedShifts);
+    showScreen("calendar");
+    showCalendar(expectedProfile);
   });
   el.menuRequestsButton.addEventListener("click", async () => { closeMenu(); await showRequests(); });
   el.menuAccountApprovalsButton.addEventListener("click", () => { closeMenu(); showAccountApprovals(profile, roleData); });
@@ -135,12 +148,26 @@ function bindEvents() {
 
 async function handleAuthState(user) {
   if (registrationInProgress) return;
+  const sessionVersion = ++authSessionVersion;
+  activeAuthUid = user?.uid || "";
   stopRoleObserver?.();
+  stopRoleObserver = null;
+  stopShiftGroupObserver();
   clearAvailabilityCache();
-  if (!user) { profile = null; roleData = null; showScreen("login"); return; }
+  resetCalendarState();
+  setConfirmedShifts([]);
+  profile = null;
+  roleData = null;
+  if (!user) { showScreen("login"); return; }
   try {
-    profile = await loadOwnProfile(user);
-    stopRoleObserver = observeOwnRole(user.uid, nextRole => handleRoleChange(nextRole), async error => {
+    const nextProfile = await loadOwnProfile(user);
+    if (!isCurrentAuthSession(user.uid, sessionVersion)) return;
+    profile = nextProfile;
+    stopRoleObserver = observeOwnRole(user.uid, async nextRole => {
+      if (!isCurrentAuthSession(user.uid, sessionVersion)) return;
+      await handleRoleChange(nextRole, user.uid, sessionVersion);
+    }, async error => {
+      if (!isCurrentAuthSession(user.uid, sessionVersion)) return;
       console.error(error); await signOutUser();
     });
   } catch (error) {
@@ -149,7 +176,8 @@ async function handleAuthState(user) {
   }
 }
 
-async function handleRoleChange(nextRole) {
+async function handleRoleChange(nextRole, expectedUid = activeAuthUid, sessionVersion = authSessionVersion) {
+  if (!isCurrentAuthSession(expectedUid, sessionVersion) || profile?.uid !== expectedUid) return;
   if (!nextRole) {
     await signOutUser();
     showMessage(el.loginMessage, "このアカウントは現在利用できません。国分寺支社へお問い合わせください。", true);
@@ -193,8 +221,12 @@ async function handleRoleChange(nextRole) {
   el.menuOwnShiftsButton.textContent = isOffice ? "自分のシフト" : "シフト確認";
   if (isOffice) await showAdmin(profile, roleData);
   else {
-    await loadOwnAvailability(profile.uid);
-    setConfirmedShifts(await loadOwnConfirmedShifts(profile.uid, profile.branchId));
+    resetCalendarState();
+    const loaded = await loadOwnAvailability(expectedUid, profile.branchId);
+    if (!loaded || !isCurrentAuthSession(expectedUid, sessionVersion)) return;
+    const confirmedShifts = await loadOwnConfirmedShifts(expectedUid, profile.branchId);
+    if (!isCurrentAuthSession(expectedUid, sessionVersion)) return;
+    setConfirmedShifts(confirmedShifts);
     showScreen("calendar");
     showCalendar(profile);
   }
@@ -328,8 +360,17 @@ function staffRequestErrorMessage(error) {
 }
 
 async function signOutUser() {
+  authSessionVersion += 1;
+  activeAuthUid = "";
   closeMenu(); stopAccountApprovals(); stopRoleObserver?.(); stopRoleObserver = null;
+  stopShiftGroupObserver();
+  clearAvailabilityCache(); resetCalendarState(); setConfirmedShifts([]);
+  profile = null; roleData = null;
   await logout(); el.loginPassword.value = ""; showToast("ログアウトしました。");
+}
+
+function isCurrentAuthSession(uid, sessionVersion) {
+  return Boolean(uid) && activeAuthUid === uid && authSessionVersion === sessionVersion;
 }
 function openMenu() {
   if (!isOperationalAccount(roleData?.accountStatus)) return;
@@ -343,6 +384,7 @@ function closeMenu() {
   el.sideMenu.scrollTop = 0;
 }
 function showScreen(name) {
+  if (name !== "shiftBuilder") stopShiftGroupObserver();
   const screens = {login:el.loginScreen, register:el.registerScreen,
     pendingApproval:el.pendingApprovalScreen, rejectedAccount:el.rejectedAccountScreen,
     calendar:el.calendarScreen,
@@ -368,8 +410,12 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   if (!canProxyInput(worker)) return;
   const inputMode = worker.inputMode === "managed" ? "managed" : "web";
   if (inputMode === "web" && !await confirmWebProxyStart(worker)) return;
+  const operatorUid = profile?.uid;
+  const sessionVersion = authSessionVersion;
+  resetCalendarState();
   try {
-    await loadOwnAvailability(worker.id || worker.uid, worker.branchId || roleData.branchId);
+    const loaded = await loadOwnAvailability(worker.id || worker.uid, worker.branchId || roleData.branchId);
+    if (!loaded || !isCurrentAuthSession(operatorUid, sessionVersion)) return;
   } catch (error) {
     console.error(error);
     showToast("代理入力画面を開けませんでした。Firestore Rulesのデプロイ状態を確認してください。");
@@ -379,7 +425,7 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   showScreen("calendar");
   showCalendar({ ...worker, uid: worker.id || worker.uid }, {
     proxy: true,
-    operatorUid: profile.uid,
+    operatorUid,
     operatorRole: roleData.role,
     inputMode,
     returnAction: async () => {
