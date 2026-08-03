@@ -1,5 +1,5 @@
 import { auth, db } from "./firebase-config.js";
-import { collection, doc, getDoc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { ALL_BRANCHES, branchName, effectiveBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
@@ -444,7 +444,7 @@ async function saveProxyCellChange(cell, wish, shiftType, user, date) {
   cell.classList.add("is-saving");
   cell.setAttribute("aria-disabled", "true");
   try {
-    const saved = await writeProxyAvailabilityCell(user, date, shiftType, nextState);
+    const saved = await writeProxyAvailabilityCell(user, date, shiftType, nextState, wish);
     applyScheduleMark(cell, saved, shiftType);
   } catch (error) {
     console.error("勤務希望の編集に失敗しました", { error, targetUid: user.uid, date, shiftType });
@@ -462,52 +462,47 @@ async function saveProxyCellChange(cell, wish, shiftType, user, date) {
   }
 }
 
-async function writeProxyAvailabilityCell(user, date, shiftType, nextState) {
+async function writeProxyAvailabilityCell(user, date, shiftType, nextState, current) {
   const operatorUid = auth.currentUser?.uid || "";
   if (!operatorUid || !canStartTableProxy(user)) throw Object.assign(new Error("proxy not allowed"), { code: "permission-denied" });
   const reference = doc(db, "availability", `${date}_${user.uid}`);
-  const result = await runTransaction(db, async transaction => {
-    const snapshot = await transaction.get(reference);
-    const current = snapshot.exists() ? snapshot.data() : null;
-    const values = {
-      day: Boolean(current?.day),
-      night: Boolean(current?.night),
-      dayEntered: current ? (Object.hasOwn(current, "dayEntered") ? Boolean(current.dayEntered) : !current.undecided) : false,
-      nightEntered: current ? (Object.hasOwn(current, "nightEntered") ? Boolean(current.nightEntered) : !current.undecided) : false
-    };
-    values[shiftType] = nextState === "available";
-    values[`${shiftType}Entered`] = nextState !== "blank";
-    const isSelfEdit = operatorUid === user.uid;
-    const selectedBranchId = effectiveBranchId(currentRole);
-    const writeBranchId = user.branchId || current?.branchId ||
-      (selectedBranchId !== ALL_BRANCHES ? selectedBranchId : "");
-    if (!writeBranchId) {
-      throw Object.assign(new Error("branch selection required"), { code: "failed-precondition" });
-    }
-    const data = {
-      uid: user.uid,
-      branchId: writeBranchId,
-      date,
-      day: values.day,
-      night: values.night,
-      dayEntered: values.dayEntered,
-      nightEntered: values.nightEntered,
-      unavailable: values.dayEntered && values.nightEntered && !values.day && !values.night,
-      undecided: false,
-      note: String(current?.note || ""),
-      updatedByUid: operatorUid,
-      updatedByName: String(currentProfile?.name || "").slice(0, 80),
-      updatedByType: isSelfEdit ? "self" : "proxy",
-      updatedByRole: isSelfEdit ? "" : currentRole.role,
-      updateReason: isSelfEdit ? "" : "staff_correction",
-      updateReasonNote: "",
-      updatedAfterDeadline: isSelfEdit ? false : isAfterAvailabilityDeadline(date, shiftType),
-      updatedAt: serverTimestamp()
-    };
-    if (snapshot.exists()) transaction.update(reference, data);
-    else transaction.set(reference, { ...data, createdAt: serverTimestamp() });
-    return data;
-  });
+  const values = {
+    day: Boolean(current?.day),
+    night: Boolean(current?.night),
+    dayEntered: current ? (Object.hasOwn(current, "dayEntered") ? Boolean(current.dayEntered) : !current.undecided) : false,
+    nightEntered: current ? (Object.hasOwn(current, "nightEntered") ? Boolean(current.nightEntered) : !current.undecided) : false
+  };
+  values[shiftType] = nextState === "available";
+  values[`${shiftType}Entered`] = nextState !== "blank";
+  const isSelfEdit = operatorUid === user.uid;
+  const selectedBranchId = effectiveBranchId(currentRole);
+  const writeBranchId = user.branchId || current?.branchId ||
+    (selectedBranchId !== ALL_BRANCHES ? selectedBranchId : "");
+  if (!writeBranchId) {
+    throw Object.assign(new Error("branch selection required"), { code: "failed-precondition" });
+  }
+  const result = {
+    uid: user.uid,
+    branchId: writeBranchId,
+    date,
+    day: values.day,
+    night: values.night,
+    dayEntered: values.dayEntered,
+    nightEntered: values.nightEntered,
+    unavailable: values.dayEntered && values.nightEntered && !values.day && !values.night,
+    undecided: false,
+    note: String(current?.note || ""),
+    updatedByUid: operatorUid,
+    updatedByName: String(currentProfile?.name || "").slice(0, 80),
+    updatedByType: isSelfEdit ? "self" : "proxy",
+    updatedByRole: isSelfEdit ? "" : currentRole.role,
+    updateReason: isSelfEdit ? "" : "staff_correction",
+    updateReasonNote: "",
+    updatedAfterDeadline: isSelfEdit ? false : isAfterAvailabilityDeadline(date, shiftType),
+    updatedAt: serverTimestamp()
+  };
+  if (current) await updateDoc(reference, result);
+  else await setDoc(reference, { ...result, createdAt: serverTimestamp() });
   await setDoc(doc(db, "shiftCandidateAvailability", `${date}_${user.uid}`), {
     uid: user.uid, branchId: result.branchId, date,
     day: result.day, night: result.night, unavailable: result.unavailable,
