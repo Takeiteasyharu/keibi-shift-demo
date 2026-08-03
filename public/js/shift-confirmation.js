@@ -8,20 +8,29 @@ import {
   where
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { createMapAddressLink, createMapButton } from "./map-link.js";
-// app.js と同じURLに統一し、初期化済みのモジュールインスタンスを共有する。
-import { createSelfProgressSection } from "./shift-progress.js?v=20260730-2";
+import { branchName } from "./branches.js";
+import { createSelfProgressSection } from "./shift-progress.js?v=20260803-1";
 
 let el;
 let navigate;
 let currentProfile;
 let unsubscribe = null;
-let shifts = [];
+let upcomingShifts = [];
+let pastShifts = [];
+let pastVisibleCount = 20;
+const progressByShiftId = new Map();
+let observerVersion = 0;
 
 export function initShiftConfirmation(elements, showScreen) {
   el = elements;
   navigate = showScreen;
   el.closeOwnShiftDetailButton.addEventListener("click", closeDetail);
   el.closeShiftMembersButton.addEventListener("click", closeMembers);
+  el.loadMorePastShiftsButton.addEventListener("click", async () => {
+    pastVisibleCount += 20;
+    await loadVisibleProgress();
+    render();
+  });
   el.ownShiftDetailModal.addEventListener("click", event => {
     if (event.target === el.ownShiftDetailModal) closeDetail();
   });
@@ -36,45 +45,90 @@ export function initShiftConfirmation(elements, showScreen) {
 }
 
 export function showOwnShifts(profile) {
+  const version = ++observerVersion;
   currentProfile = profile;
+  pastVisibleCount = 20;
+  progressByShiftId.clear();
   navigate("ownShifts");
-  el.ownShiftsMessage.textContent = "確定シフトを読み込んでいます。";
+  el.ownShiftsMessage.textContent = "自分の確定シフトを読み込んでいます。";
   el.ownShiftsMessage.className = "message show";
+  el.ownShiftsList.replaceChildren();
+  el.pastShiftsList.replaceChildren();
+  el.loadMorePastShiftsButton.hidden = true;
   unsubscribe?.();
-  const ownQuery = profile.branchId
-    ? query(collection(db, "shiftGroups"), where("branchId", "==", profile.branchId),
-      where("status", "==", "confirmed"), where("memberUids", "array-contains", profile.uid))
-    : query(collection(db, "shiftGroups"), where("status", "==", "confirmed"),
-      where("memberUids", "array-contains", profile.uid));
-  unsubscribe = onSnapshot(ownQuery, snapshot => {
+  const ownQuery = query(collection(db, "shiftGroups"),
+    where("status", "==", "confirmed"),
+    where("memberUids", "array-contains", profile.uid));
+  unsubscribe = onSnapshot(ownQuery, async snapshot => {
+    if (version !== observerVersion || currentProfile?.uid !== profile.uid) return;
     closeMembers();
     const today = toDateKey(new Date());
-    shifts = snapshot.docs
+    const all = snapshot.docs
       .map(item => ({ id: item.id, ...item.data() }))
-      .filter(item => item.date >= today)
+      .filter(item => item.status === "confirmed" && Array.isArray(item.memberUids)
+        && item.memberUids.includes(profile.uid));
+    upcomingShifts = all.filter(item => item.date >= today)
       .sort((a, b) => a.date.localeCompare(b.date) || String(a.startTime).localeCompare(String(b.startTime)));
+    pastShifts = all.filter(item => item.date < today)
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.startTime).localeCompare(String(a.startTime)));
+    await loadVisibleProgress();
+    if (version !== observerVersion || currentProfile?.uid !== profile.uid) return;
     el.ownShiftsMessage.className = "message";
     render();
   }, error => {
+    if (version !== observerVersion || currentProfile?.uid !== profile.uid) return;
     console.error(error);
     el.ownShiftsMessage.textContent = "シフトを読み込めませんでした。通信状態を確認してください。";
     el.ownShiftsMessage.className = "message show error";
   });
 }
 
+export function stopOwnShiftsObserver() {
+  observerVersion += 1;
+  unsubscribe?.();
+  unsubscribe = null;
+  upcomingShifts = [];
+  pastShifts = [];
+  progressByShiftId.clear();
+  currentProfile = null;
+}
+
+async function loadVisibleProgress() {
+  if (!currentProfile?.uid) return;
+  const targets = [...upcomingShifts, ...pastShifts.slice(0, pastVisibleCount)]
+    .filter(shift => !progressByShiftId.has(shift.id));
+  const results = await Promise.all(targets.map(async shift => {
+    try {
+      const snapshot = await getDoc(doc(db, "shiftProgress", shift.id, "workers", currentProfile.uid));
+      return [shift.id, snapshot.data() || {}];
+    } catch (error) {
+      console.warn("シフトの上番状況を取得できませんでした", { shiftId: shift.id, code: error?.code });
+      return [shift.id, {}];
+    }
+  }));
+  results.forEach(([shiftId, progress]) => progressByShiftId.set(shiftId, progress));
+}
+
 function render() {
   el.ownShiftsList.replaceChildren();
-  if (!shifts.length) {
+  el.pastShiftsList.replaceChildren();
+  renderShiftList(el.ownShiftsList, upcomingShifts, false);
+  renderShiftList(el.pastShiftsList, pastShifts.slice(0, pastVisibleCount), true);
+  el.loadMorePastShiftsButton.hidden = pastVisibleCount >= pastShifts.length;
+}
+
+function renderShiftList(container, items, isPast) {
+  if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "own-shifts-empty";
-    empty.textContent = "現在、確定しているシフトはありません。";
-    el.ownShiftsList.appendChild(empty);
+    empty.textContent = isPast ? "過去の確定シフトはありません。" : "今後の確定シフトはありません。";
+    container.appendChild(empty);
     return;
   }
-  shifts.forEach((shift, index) => {
+  items.forEach((shift, index) => {
     const card = document.createElement("article");
-    card.className = `own-shift-card shift-${shift.shiftType === "night" ? "night" : "day"}`;
-    if (index === 0) {
+    card.className = `own-shift-card ${isPast ? "is-past" : ""} shift-${shift.shiftType === "night" ? "night" : "day"}`;
+    if (!isPast && index === 0) {
       const next = document.createElement("div");
       next.className = "next-shift-label";
       next.textContent = "次回の勤務";
@@ -96,8 +150,12 @@ function render() {
     summaryAddress.lastChild.replaceWith(createMapAddressLink(shift.address));
     summary.append(
       summaryAddress,
-      detailLine("勤務開始", shift.startTime),
-      detailLine("役割", roleLabel(shift))
+      detailLine("集合・開始", shift.meetingTime || shift.startTime),
+      detailLine("勤務時間", timeRange(shift)),
+      detailLine("役割", roleLabel(shift)),
+      detailLine("所属支社", branchName(shift.branchId)),
+      detailLine("上番状況", progressLabel(progressByShiftId.get(shift.id))),
+      detailLine("最終更新", formatTimestamp(shift.updatedAt))
     );
     const button = document.createElement("button");
     button.type = "button";
@@ -105,7 +163,7 @@ function render() {
     button.addEventListener("click", () => openDetail(shift));
     const mapButton = createMapButton(shift.address);
     card.append(heading, title, summary, mapButton, button);
-    if (shift.leaderUid === currentProfile.uid) {
+    if (!isPast && shift.leaderUid === currentProfile.uid) {
       const membersButton = document.createElement("button");
       membersButton.type = "button";
       membersButton.className = "leader-members-button";
@@ -113,8 +171,15 @@ function render() {
       membersButton.addEventListener("click", () => openMembers(shift));
       card.appendChild(membersButton);
     }
-    el.ownShiftsList.appendChild(card);
+    container.appendChild(card);
   });
+}
+
+function progressLabel(progress = {}) {
+  if (progress.arrivedAt) return `上番済み ${formatTimestamp(progress.arrivedAt)}`;
+  if (progress.departedAt) return `出発済み ${formatTimestamp(progress.departedAt)}`;
+  if (progress.departureAcknowledgedAt) return `出発確認済み ${formatTimestamp(progress.departureAcknowledgedAt)}`;
+  return "未上番";
 }
 
 async function openDetail(shift) {
@@ -130,10 +195,12 @@ async function openDetail(shift) {
     detailLine("集合時刻", shift.meetingTime),
     detailLine("勤務予定", timeRange(shift)),
     detailLine("役割", roleLabel(shift)),
+    detailLine("所属支社", branchName(shift.branchId)),
+    detailLine("上番状況", progressLabel(progressByShiftId.get(shift.id))),
     detailLine("備考", shift.note),
     detailLine("最終更新", formatTimestamp(shift.updatedAt))
   );
-  if (shift.leaderUid === currentProfile.uid) {
+  if (shift.date >= toDateKey(new Date()) && shift.leaderUid === currentProfile.uid) {
     const membersButton = document.createElement("button");
     membersButton.type = "button";
     membersButton.className = "leader-members-button";

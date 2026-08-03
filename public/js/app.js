@@ -1,12 +1,12 @@
-import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260801-5";
-import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260803-6";
-import { initCalendar, resetCalendarState, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260803-9";
-import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin } from "./admin.js?v=20260801-11";
+import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260803-1";
+import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260803-8";
+import { initCalendar, resetCalendarState, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260803-13";
+import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin, stopAdminObserver } from "./admin.js?v=20260803-8";
 import { initShifts, loadOwnConfirmedShifts, stopShiftGroupObserver } from "./shifts.js?v=20260803-1";
-import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260801-5";
-import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260801-1";
-import { initShiftConfirmation, showOwnShifts } from "./shift-confirmation.js?v=20260801-1";
-import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260801-2";
+import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260803-6";
+import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260803-1";
+import { initShiftConfirmation, showOwnShifts, stopOwnShiftsObserver } from "./shift-confirmation.js?v=20260803-2";
+import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260803-1";
 import { initAccountApprovals, showAccountApprovals, stopAccountApprovals } from "./account-approvals.js?v=20260801-2";
 import { ALL_BRANCHES, branchName, effectiveBranchId, ensureBranchDocuments, getAdminSelectedBranchId, isOperationalAccount, populateBranchSelect, setAdminSelectedBranchId } from "./branches.js?v=20260801-1";
 
@@ -23,7 +23,7 @@ let activeAuthUid = "";
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
-  initAdmin(el, showScreen, createIntegratedWorkerMenu);
+  initAdmin(el, showScreen, createIntegratedWorkerMenu, showToast);
   initCalendar(el, showToast);
   showShiftBuilder = initShifts(el, showScreen, showToast);
   initGuardManagement(el, showScreen, showToast, openProxyCalendar, async (worker, accountStatus) => {
@@ -44,20 +44,20 @@ document.addEventListener("DOMContentLoaded", () => {
 function cacheElements() {
   ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
-   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regRequestedBranch","regStaffRequested","regZip","regPref","regCity","regStreet","regBuilding","regNearestStation","regPhone","regEmail","regPassword",
+   "showRegisterButton","forgotPasswordButton","regGuardId","regName","regFurigana","regRequestedBranch","regStaffRequested","regZip","regPref","regCity","regStreet","regBuilding","regNearestStation","regPhone","regEmail","regPassword",
    "regPasswordConfirm","pendingLogoutButton","rejectedLogoutButton","rejectedAccountReason",
    "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
    "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
-   "adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
+   "adminTableHead","adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
    "menuButton","requestsMenuButton","accountApprovalsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","dailyProgressMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
    "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuDailyProgressButton","applicationsMenuGroup","menuRequestsButton","menuAccountApprovalsButton","adminBranchSwitchWrap","adminBranchSwitch","menuLogoutButton",
    "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
    "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
-   "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName","managedGuardPhone",
+   "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName","managedGuardFurigana","managedGuardPhone",
    "managedGuardPostalCode","managedGuardPrefecture","managedGuardCity","managedGuardAddressLine","managedGuardBuilding",
    "managedGuardNearestStation","managedGuardContactEmailLabel","managedGuardContactEmail","saveManagedGuardButton","cancelManagedGuardButton",
-   "managedGuardFixedInputMode","managedGuardFixedRole","managedGuardFixedStatus",
+   "managedGuardFixedInputMode","managedGuardFixedRole","managedGuardFixedStatus","managedGuardLastUpdate",
    "webProfileEditConfirmModal","webProfileEditConfirmMessage","cancelWebProfileEditButton","confirmWebProfileEditButton",
    "profileSaveConfirmModal","profileSaveConfirmMessage","cancelProfileSaveButton","confirmProfileSaveButton",
    "webProxyConfirmModal","webProxyConfirmMessage","cancelWebProxyButton","startWebProxyButton",
@@ -65,7 +65,7 @@ function cacheElements() {
    "staffRequestsList","staffRequestsMessage","shiftBuilderScreen","shiftBuilderMenuButton","menuShiftBuilderButton",
    "accountApprovalsMessage","accountApprovalsTableBody","accountApprovalsCards","accountRejectionModal","accountRejectionTarget","accountRejectionReason","accountRejectionMessage","cancelAccountRejectionButton","confirmAccountRejectionButton",
    "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
-   "ownShiftsMessage","ownShiftsList","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
+   "ownShiftsMessage","ownShiftsList","pastShiftsList","loadMorePastShiftsButton","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
    "shiftMembersModal","shiftMembersTitle","shiftMembersSummary","shiftMembersList","closeShiftMembersButton",
    "dailyProgressMessage","progressDate","progressShiftType","progressFilters","dailyProgressTableBody","dailyProgressCards",
    "departureTimeModal","departureTimeInput","departureTimeMessage","cancelDepartureTimeButton","confirmDepartureTimeButton",
@@ -73,8 +73,8 @@ function cacheElements() {
    "shiftGroupModal","shiftGroupModalTitle","shiftGroupBranchWrap","shiftGroupBranch","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftDepartureCheckTime","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
    "shiftOperationConfirmModal","shiftOperationConfirmTitle","shiftOperationConfirmMessage","confirmShiftOperationButton","cancelShiftOperationButton",
-   "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails",
-   "choiceDay","choiceNight","choiceUnavailable","choiceUndecided","shiftNote","saveShiftButton",
+   "shiftModalBackdrop","modalTitle","modalLockNote","confirmedShiftDetails","availabilityAudit",
+   "choiceDay","choiceNight","choiceBoth","choiceUnavailable","shiftNote","saveShiftButton",
    "closeShiftButton","toast"].forEach(id => { el[id] = document.getElementById(id); });
 }
 
@@ -153,6 +153,7 @@ async function handleAuthState(user) {
   stopRoleObserver?.();
   stopRoleObserver = null;
   stopShiftGroupObserver();
+  stopOwnShiftsObserver();
   clearAvailabilityCache();
   resetCalendarState();
   setConfirmedShifts([]);
@@ -247,6 +248,7 @@ async function login() {
 async function register() {
   const form = {
     employeeNumber: el.regGuardId.value.trim(), name: el.regName.value.trim(),
+    furigana: el.regFurigana.value.trim(),
     requestedBranchId: el.regRequestedBranch.value,
     postalCode: el.regZip.value.replace(/\D/g, ""),
     prefecture: el.regPref.value.trim(), city: el.regCity.value.trim(),
@@ -283,6 +285,10 @@ function validateRegistration(form, confirmation) {
   const errors = [];
   if (!/^\d{6}$/.test(form.employeeNumber)) errors.push("警備員番号は6桁で入力してください");
   if (!form.name || form.name.length > 80) errors.push("氏名を80文字以内で入力してください");
+  if (!form.furigana) errors.push("ふりがなを入力してください");
+  else if (form.furigana.length > 80 || !/^[ぁ-んァ-ヶー・\s]+$/u.test(form.furigana)) {
+    errors.push("ふりがなは、ひらがなまたはカタカナで入力してください");
+  }
   if (!["kokubunji", "mitaka"].includes(form.requestedBranchId)) errors.push("希望所属支社を選択してください");
   if (form.postalCode && !/^\d{7}$/.test(form.postalCode)) errors.push("郵便番号は7桁で入力してください");
   if (!form.prefecture || !form.city || !form.addressLine) errors.push("住所を入力してください");
@@ -364,6 +370,7 @@ async function signOutUser() {
   activeAuthUid = "";
   closeMenu(); stopAccountApprovals(); stopRoleObserver?.(); stopRoleObserver = null;
   stopShiftGroupObserver();
+  stopOwnShiftsObserver();
   clearAvailabilityCache(); resetCalendarState(); setConfirmedShifts([]);
   profile = null; roleData = null;
   await logout(); el.loginPassword.value = ""; showToast("ログアウトしました。");
@@ -384,7 +391,9 @@ function closeMenu() {
   el.sideMenu.scrollTop = 0;
 }
 function showScreen(name) {
+  if (name !== "admin") stopAdminObserver();
   if (name !== "shiftBuilder") stopShiftGroupObserver();
+  if (name !== "ownShifts") stopOwnShiftsObserver();
   const screens = {login:el.loginScreen, register:el.registerScreen,
     pendingApproval:el.pendingApprovalScreen, rejectedAccount:el.rejectedAccountScreen,
     calendar:el.calendarScreen,
@@ -418,7 +427,7 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
     if (!loaded || !isCurrentAuthSession(operatorUid, sessionVersion)) return;
   } catch (error) {
     console.error(error);
-    showToast("代理入力画面を開けませんでした。Firestore Rulesのデプロイ状態を確認してください。");
+    showToast("勤務希望の編集画面を開けませんでした。Firestore Rulesのデプロイ状態を確認してください。");
     return;
   }
   setConfirmedShifts([]);
@@ -426,6 +435,7 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   showCalendar({ ...worker, uid: worker.id || worker.uid }, {
     proxy: true,
     operatorUid,
+    operatorName: profile?.name || "",
     operatorRole: roleData.role,
     inputMode,
     returnAction: async () => {
@@ -436,19 +446,17 @@ async function openProxyCalendar(worker, returnScreen = "proxyWorkers") {
   });
 }
 function canProxyInput(worker) {
-  const workerUid = worker?.id || worker?.uid;
   const inputMode = worker?.inputMode === "managed" ? "managed" : "web";
   return ["staff", "admin"].includes(roleData?.role) &&
     ["managed", "web"].includes(inputMode) &&
     isOperationalAccount(worker?.accountStatus) &&
-    (effectiveBranchId(roleData) === ALL_BRANCHES || worker?.branchId === effectiveBranchId(roleData)) &&
-    workerUid !== profile?.uid &&
+    (roleData.role === "admin" || worker?.branchId === effectiveBranchId(roleData)) &&
     (roleData.role === "admin" || worker?.role !== "admin");
 }
 function confirmWebProxyStart(worker) {
   el.webProxyConfirmMessage.textContent =
     `この警備員は本人がWebから勤務希望を入力できます。\n` +
-    `代理入力を行うと、本人が入力した内容を上書きする可能性があります。\n\n` +
+    `内勤者が変更すると、本人が入力した内容を上書きする可能性があります。\n\n` +
     `本人から電話・対面などで変更依頼を受けていることを確認してください。\n\n` +
     `対象：\n警備員番号：${worker.employeeNumber}\n氏名：${worker.name}`;
   el.webProxyConfirmModal.classList.add("show");

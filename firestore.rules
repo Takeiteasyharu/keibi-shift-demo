@@ -1,7 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // users/{workerId}: profile PII. Web users use workerId == Auth UID;
+    // users/{workerId}: profile PII (including optional furigana). Web users use workerId == Auth UID;
     // managed users use an auto ID, inputMode == managed, authUid == null.
     // userRoles/{workerId}: role, branchId, accountStatus, leaderEligible, timestamps
     // employeeNumbers/{6 digits}: uid
@@ -32,11 +32,12 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
         'addressLine','building','nearestStation','createdAt','updatedAt'])
-        && data.keys().hasOnly(['employeeNumber','name','contactEmail','postalCode','prefecture','city',
+        && data.keys().hasOnly(['employeeNumber','name','furigana','contactEmail','postalCode','prefecture','city',
         'addressLine','building','nearestStation','phone','branchId','requestedBranchId','inputMode','authUid','createdBy',
-        'updatedByUid','createdAt','updatedAt'])
+        'updatedByUid','updatedByName','createdAt','updatedAt'])
         && data.employeeNumber is string && data.employeeNumber.matches('^[0-9]{6}$')
         && validText(data.name,1,80)
+        && (!('furigana' in data) || (validText(data.furigana,1,80) && data.furigana.matches('^[ぁ-んァ-ヶー・ 　]+$')))
         && (data.contactEmail == '' || validEmail(data.contactEmail))
         && data.postalCode is string && (data.postalCode == '' || data.postalCode.matches('^[0-9]{7}$'))
         && validText(data.prefecture,0,20) && validText(data.city,0,80)
@@ -49,6 +50,7 @@ service cloud.firestore {
         && (!('authUid' in data) || data.authUid == null || validText(data.authUid,1,128))
         && (!('createdBy' in data) || validText(data.createdBy,1,128))
         && (!('updatedByUid' in data) || validText(data.updatedByUid,1,128))
+        && (!('updatedByName' in data) || validText(data.updatedByName,1,80))
         && data.createdAt is timestamp && data.updatedAt is timestamp;
     }
     function isValidManagedUser(data) {
@@ -130,16 +132,19 @@ service cloud.firestore {
     }
     function isValidAvailability(data,id) {
       return data.keys().hasAll(['uid','branchId','date','day','night','unavailable','undecided','note',
-          'updatedByUid','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
-        && data.keys().hasOnly(['uid','branchId','date','day','night','unavailable','undecided','note',
-          'updatedByUid','updatedByType','updatedByRole','updateReason','updateReasonNote',
+          'updatedByUid','updatedByName','updatedByType','updatedAfterDeadline','createdAt','updatedAt'])
+        && data.keys().hasOnly(['uid','branchId','date','day','night','dayEntered','nightEntered','unavailable','undecided','note',
+          'updatedByUid','updatedByName','updatedByType','updatedByRole','updateReason','updateReasonNote',
           'updatedAfterDeadline','createdAt','updatedAt'])
         && (isAdmin() || data.branchId == myRole().branchId)
         && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && id == data.date + '_' + data.uid && data.day is bool && data.night is bool
+        && (!('dayEntered' in data) || data.dayEntered is bool)
+        && (!('nightEntered' in data) || data.nightEntered is bool)
         && data.unavailable is bool && data.undecided is bool && validChoice(data)
         && validText(data.note,0,500)
-        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','proxy']
+        && validText(data.updatedByUid,1,128) && validText(data.updatedByName,1,80)
+        && data.updatedByType in ['self','proxy']
         && (!('updatedByRole' in data) || validText(data.updatedByRole,0,10))
         && (!('updateReason' in data) || validText(data.updateReason,0,40))
         && (!('updateReasonNote' in data) || validText(data.updateReasonNote,0,200))
@@ -149,6 +154,7 @@ service cloud.firestore {
     function isSelfAvailability(data) {
       return data.uid == request.auth.uid
         && data.updatedByUid == request.auth.uid && data.updatedByType == 'self'
+        && data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
         && (!('updatedByRole' in data) || data.updatedByRole == '')
         && (!('updateReason' in data) || data.updateReason == '')
         && (!('updateReasonNote' in data) || data.updateReasonNote == '')
@@ -164,9 +170,12 @@ service cloud.firestore {
     }
     function isManagedAvailability(data) {
       return isOffice() && data.uid != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(data.uid))
+        && exists(rolePath(data.uid))
         && data.updatedByUid == request.auth.uid
-        && isSameBranch(get(/databases/$(database)/documents/users/$(data.uid)).data.branchId)
-        && get(rolePath(data.uid)).data.branchId == get(/databases/$(database)/documents/users/$(data.uid)).data.branchId
+        && data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+        && data.branchId == get(rolePath(data.uid)).data.branchId
+        && isSameBranch(get(rolePath(data.uid)).data.branchId)
         && isOperationalStatus(get(rolePath(data.uid)).data.accountStatus)
         && hasValidProxyAudit(data)
         && (get(/databases/$(database)/documents/users/$(data.uid)).data.inputMode in ['managed','web']
@@ -235,10 +244,10 @@ service cloud.firestore {
     }
     function isValidProgress(data, shiftId, workerId) {
       return data.keys().hasAll(['shiftGroupId','workerId','branchId','date','shiftType',
-          'createdAt','updatedAt','updatedByUid','updatedByType'])
+          'createdAt','updatedAt','updatedByUid','updatedByName','updatedByType'])
         && data.keys().hasOnly(['shiftGroupId','workerId','branchId','date','shiftType',
           'departureAcknowledgedAt','departureTime','departedAt','arrivedAt',
-          'createdAt','updatedAt','updatedByUid','updatedByType'])
+          'createdAt','updatedAt','updatedByUid','updatedByName','updatedByType'])
         && data.shiftGroupId == shiftId && data.workerId == workerId
         && validText(data.shiftGroupId,1,128) && validText(data.workerId,1,128)
         && validText(data.branchId,1,40)
@@ -250,7 +259,8 @@ service cloud.firestore {
         && (!('departedAt' in data) || data.departedAt is timestamp)
         && (!('arrivedAt' in data) || data.arrivedAt is timestamp)
         && data.createdAt is timestamp && data.updatedAt is timestamp
-        && validText(data.updatedByUid,1,128) && data.updatedByType in ['self','staff'];
+        && validText(data.updatedByUid,1,128) && validText(data.updatedByName,1,80)
+        && data.updatedByType in ['self','staff'];
     }
     function progressMatchesShift(data) {
       return get(shiftPath(data.shiftGroupId)).data.status == 'confirmed'
@@ -339,6 +349,7 @@ service cloud.firestore {
         && (
           (isOwner(uid)
             && !('branchId' in request.resource.data)
+            && validText(request.resource.data.furigana,1,80)
             && validBranchId(request.resource.data.requestedBranchId)
             && request.resource.data.inputMode == 'web'
             && request.resource.data.authUid == uid
@@ -376,8 +387,8 @@ service cloud.firestore {
             && (isAdmin() || get(rolePath(uid)).data.role != 'admin')
             && request.resource.data.updatedByUid == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'name','phone','postalCode','prefecture','city','addressLine','building',
-              'nearestStation','contactEmail','updatedByUid','updatedAt'
+              'name','furigana','phone','postalCode','prefecture','city','addressLine','building',
+              'nearestStation','contactEmail','updatedByUid','updatedByName','updatedAt'
             ])
             && (resource.data.inputMode == 'managed'
               || request.resource.data.contactEmail == resource.data.contactEmail))
@@ -522,7 +533,6 @@ service cloud.firestore {
     match /shiftGroups/{id} {
       allow read: if isActive() && ((isAdmin() || (isStaff() && resource.data.branchId == myRole().branchId))
         || (resource.data.status == 'confirmed'
-          && resource.data.branchId == myRole().branchId
           && (request.auth.uid in resource.data.memberUids
             || resource.data.leaderUid == request.auth.uid)));
       allow create: if isOffice() && isValidShiftGroup(request.resource.data)
@@ -628,7 +638,6 @@ service cloud.firestore {
       allow read: if isActive() && (
         (workerId == request.auth.uid
           && get(shiftPath(shiftId)).data.status == 'confirmed'
-          && get(shiftPath(shiftId)).data.branchId == myRole().branchId
           && workerId in get(shiftPath(shiftId)).data.memberUids)
         || (isOffice() && isSameBranch(get(shiftPath(shiftId)).data.branchId))
         || (get(shiftPath(shiftId)).data.status == 'confirmed'
@@ -644,10 +653,12 @@ service cloud.firestore {
         && (
           (request.resource.data.workerId == request.auth.uid
             && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
             && request.resource.data.updatedByType == 'self'
             && selfProgressTimestampsValid())
           || (isOffice() && isSameBranch(request.resource.data.branchId)
             && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
             && request.resource.data.updatedByType == 'staff')
         );
       allow update: if isActive() && isValidProgress(request.resource.data,shiftId,workerId)
@@ -663,6 +674,7 @@ service cloud.firestore {
         && (
           (resource.data.workerId == request.auth.uid
             && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
             && request.resource.data.updatedByType == 'self'
             && selfProgressTimestampsValid()
             && (!('departureAcknowledgedAt' in resource.data)
@@ -671,6 +683,7 @@ service cloud.firestore {
             && (!('arrivedAt' in resource.data) || request.resource.data.arrivedAt == resource.data.arrivedAt))
           || (isOffice() && isSameBranch(resource.data.branchId)
             && request.resource.data.updatedByUid == request.auth.uid
+            && request.resource.data.updatedByName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
             && request.resource.data.updatedByType == 'staff')
         );
       allow delete: if false;

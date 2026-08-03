@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "availability",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "branchId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "shiftCandidateAssignments",
       "queryScope": "COLLECTION",
       "fields": [

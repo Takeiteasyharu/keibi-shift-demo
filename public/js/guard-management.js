@@ -6,6 +6,8 @@ import {
   getDocs,
   query,
   serverTimestamp,
+  setDoc,
+  updateDoc,
   where,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
@@ -67,12 +69,16 @@ export function initGuardManagement(elements, showScreen, showToast, proxyCalend
     if (el.webProfileEditConfirmModal.classList.contains("show")) closeWebEditConfirm();
     if (el.profileSaveConfirmModal.classList.contains("show")) closeProfileSaveConfirm();
   });
+  window.addEventListener("resize", closeActionMenu);
+  document.addEventListener("scroll", event => {
+    if (openActionMenu?.menu.classList.contains("table-floating-menu")) closeActionMenu();
+  }, true);
 }
 
 export function createIntegratedWorkerMenu(worker, profile, role) {
   currentProfile = profile;
   currentRole = role;
-  return createWorkerActionMenu(worker);
+  return createWorkerActionMenu(worker, false);
 }
 
 export function setGuardManagementContext(profile, role) {
@@ -268,7 +274,7 @@ function createWorkerCard(worker) {
   return card;
 }
 
-function createWorkerActionMenu(worker) {
+function createWorkerActionMenu(worker, includeLegacyProxyAction = true) {
   const wrap = document.createElement("div");
   wrap.className = "worker-action-menu-wrap";
   const trigger = document.createElement("button");
@@ -281,9 +287,9 @@ function createWorkerActionMenu(worker) {
   menu.className = "worker-action-menu";
   menu.hidden = true;
 
-  if (canEditWorker(worker)) menu.appendChild(createMenuButton("編集", () => requestWorkerEdit(worker)));
-  if (canProxyInput(worker)) {
-    menu.appendChild(createMenuButton("勤務希望を代理入力", () => openProxyCalendar(worker, "admin")));
+  if (canEditWorker(worker)) menu.appendChild(createMenuButton("登録情報を変更", () => requestWorkerEdit(worker)));
+  if (includeLegacyProxyAction && canProxyInput(worker)) {
+    menu.appendChild(createMenuButton("勤務希望を編集", () => openProxyCalendar(worker, "admin")));
   }
   if (canDisable(worker)) {
     menu.appendChild(createMenuButton("退職・利用停止", () => openAccountConfirm("disable", worker), true));
@@ -301,11 +307,27 @@ function createWorkerActionMenu(worker) {
     if (willOpen) {
       menu.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
-      openActionMenu = { menu, trigger };
+      const tableCell = trigger.closest(".schedule-name-cell");
+      wrap.classList.add("menu-open");
+      tableCell?.classList.add("menu-open");
+      positionTableActionMenu(menu, trigger, tableCell);
+      openActionMenu = { menu, trigger, wrap, tableCell };
     }
   });
   wrap.append(trigger, menu);
   return wrap;
+}
+
+function positionTableActionMenu(menu, trigger, tableCell) {
+  if (!tableCell || window.matchMedia("(max-width: 720px)").matches) return;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = Math.min(280, window.innerWidth - 24);
+  menu.classList.add("table-floating-menu");
+  menu.style.width = `${menuWidth}px`;
+  menu.style.left = `${Math.min(triggerRect.right + 8, window.innerWidth - menuWidth - 12)}px`;
+  menu.style.right = "auto";
+  menu.style.top = `${Math.max(12, Math.min(triggerRect.top, window.innerHeight - menu.offsetHeight - 12))}px`;
+  menu.style.bottom = "auto";
 }
 
 function createMenuButton(label, handler, destructive = false) {
@@ -323,6 +345,10 @@ function createMenuButton(label, handler, destructive = false) {
 function closeActionMenu() {
   if (!openActionMenu) return;
   openActionMenu.menu.hidden = true;
+  openActionMenu.menu.classList.remove("table-floating-menu");
+  openActionMenu.menu.removeAttribute("style");
+  openActionMenu.wrap?.classList.remove("menu-open");
+  openActionMenu.tableCell?.classList.remove("menu-open");
   openActionMenu.trigger.setAttribute("aria-expanded", "false");
   openActionMenu = null;
 }
@@ -331,7 +357,6 @@ function canProxyInput(worker) {
   const inputMode = worker.inputMode === "managed" ? "managed" : "web";
   return isOperationalAccount(worker.accountStatus) &&
     ["managed", "web"].includes(inputMode) &&
-    (worker.id || worker.uid) !== currentProfile?.uid &&
     (currentRole?.role === "admin" || worker.branchId === currentRole?.branchId) &&
     ["staff", "admin"].includes(currentRole?.role) &&
     (currentRole.role === "admin" || worker.role !== "admin");
@@ -339,7 +364,6 @@ function canProxyInput(worker) {
 
 function canEditWorker(worker) {
   return isOperationalAccount(worker.accountStatus) &&
-    (worker.id || worker.uid) !== currentProfile?.uid &&
     (currentRole?.role === "admin" || worker.branchId === currentRole?.branchId) &&
     ["staff", "admin"].includes(currentRole?.role) &&
     (currentRole.role === "admin" || worker.role !== "admin");
@@ -483,11 +507,12 @@ function openWorkerEditor(worker = null) {
   editingWorker = worker;
   const isWeb = worker && worker.inputMode !== "managed";
   el.managedGuardModalTitle.textContent = worker
-    ? `${isWeb ? "Web利用者" : "代理入力警備員"}を編集`
+    ? `${isWeb ? "Web利用者" : "内勤者入力の警備員"}の登録情報を変更`
     : "新しい警備員を登録";
   el.managedGuardEmployeeNumber.value = worker?.employeeNumber || "";
   el.managedGuardEmployeeNumber.readOnly = Boolean(worker);
   el.managedGuardName.value = worker?.name || "";
+  el.managedGuardFurigana.value = worker?.furigana || "";
   el.managedGuardPhone.value = worker?.phone || "";
   el.managedGuardPostalCode.value = worker?.postalCode || "";
   el.managedGuardPrefecture.value = worker?.prefecture || "";
@@ -498,9 +523,13 @@ function openWorkerEditor(worker = null) {
   el.managedGuardContactEmail.value = worker?.contactEmail || "";
   el.managedGuardContactEmail.readOnly = Boolean(isWeb);
   el.managedGuardContactEmailLabel.hidden = Boolean(isWeb);
-  el.managedGuardFixedInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "代理入力"}`;
+  el.managedGuardFixedInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "内勤者入力"}`;
   el.managedGuardFixedRole.textContent = `区分：${worker ? roleLabel(worker.role) : "警備員"}`;
   el.managedGuardFixedStatus.textContent = `状態：${worker?.accountStatus || "active"}`;
+  el.managedGuardLastUpdate.hidden = !worker;
+  el.managedGuardLastUpdate.textContent = worker
+    ? `最終更新者：${worker.updatedByName || "記録なし"}　最終更新日時：${formatTimestamp(worker.updatedAt)}`
+    : "";
   clearMessage(el.managedGuardFormMessage);
   el.managedGuardModal.classList.add("show");
   requestAnimationFrame(() => (worker ? el.managedGuardName : el.managedGuardEmployeeNumber).focus());
@@ -515,7 +544,7 @@ function requestWorkerEdit(worker) {
   pendingWebEditWorker = worker;
   el.webProfileEditConfirmMessage.textContent =
     `この警備員は本人がWebからプロフィールを管理できます。\n\n` +
-    `内勤者が編集すると、本人が登録している情報を変更します。\n` +
+    `内勤者が登録情報を変更すると、本人が登録している情報を書き換えます。\n` +
     `本人から変更依頼を受けていることを確認してください。\n\n` +
     `対象：\n警備員番号：${worker.employeeNumber}\n氏名：${worker.name}`;
   el.webProfileEditConfirmModal.classList.add("show");
@@ -552,7 +581,7 @@ function prepareSaveWorker() {
   pendingProfileForm = form;
   el.profileSaveConfirmMessage.textContent =
     `対象：\n警備員番号：${editingWorker.employeeNumber}\n氏名：${editingWorker.name}\n\n` +
-    "プロフィール情報を更新します。よろしいですか？";
+    "登録情報を変更します。よろしいですか？";
   el.profileSaveConfirmModal.classList.add("show");
 }
 
@@ -577,7 +606,7 @@ async function saveWorker(form) {
     if (editingWorker) await updateWorkerProfile(form);
     else await createManagedWorker(form);
     closeWorkerEditor();
-    notify(wasEditing ? "警備員情報を更新しました。" : "代理入力警備員を登録しました。");
+    notify(wasEditing ? "登録情報を変更しました。" : "内勤者入力の警備員を登録しました。");
     if (refreshIntegratedManagement) await refreshIntegratedManagement();
     else await loadWorkers();
   } catch (error) {
@@ -596,6 +625,7 @@ function readForm() {
   return {
     employeeNumber: el.managedGuardEmployeeNumber.value.trim(),
     name: el.managedGuardName.value.trim(),
+    furigana: el.managedGuardFurigana.value.trim(),
     phone: el.managedGuardPhone.value.trim(),
     postalCode: el.managedGuardPostalCode.value.replace(/\D/g, ""),
     prefecture: el.managedGuardPrefecture.value.trim(),
@@ -611,6 +641,10 @@ function validateForm(form) {
   const errors = [];
   if (!/^\d{6}$/.test(form.employeeNumber)) errors.push("警備員番号は6桁で入力してください");
   if (!form.name || form.name.length > 80) errors.push("氏名を80文字以内で入力してください");
+  if (!form.furigana) errors.push("ふりがなを入力してください");
+  else if (form.furigana.length > 80 || !/^[ぁ-んァ-ヶー・\s]+$/u.test(form.furigana)) {
+    errors.push("ふりがなは、ひらがなまたはカタカナで入力してください");
+  }
   if (form.phone && !/^[0-9+\-() 　]{6,20}$/.test(form.phone)) errors.push("電話番号を20文字以内で入力してください");
   if (!/^\d{7}$/.test(form.postalCode)) errors.push("郵便番号は7桁で入力してください");
   if (!form.prefecture || !form.city || !form.addressLine) errors.push("住所を入力してください");
@@ -657,9 +691,10 @@ async function createManagedWorker(form) {
   await batch.commit();
 }
 
-function updateWorkerProfile(form) {
+async function updateWorkerProfile(form) {
   const values = {
     name: form.name,
+    furigana: form.furigana,
     phone: form.phone,
     postalCode: form.postalCode,
     prefecture: form.prefecture,
@@ -667,19 +702,25 @@ function updateWorkerProfile(form) {
     addressLine: form.addressLine,
     building: form.building,
     nearestStation: form.nearestStation,
-    updatedByUid: currentProfile.uid,
+    updatedByName: currentProfile.name,
     updatedAt: serverTimestamp()
   };
+  if ((editingWorker.id || editingWorker.uid) !== currentProfile.uid) values.updatedByUid = currentProfile.uid;
   if (editingWorker.inputMode === "managed") values.contactEmail = form.contactEmail;
   const workerId = editingWorker.id || editingWorker.uid;
-  const batch = writeBatch(db);
-  batch.update(doc(db, "users", workerId), values);
-  batch.set(doc(db, "shiftCandidateProfiles", workerId), {
+  await updateDoc(doc(db, "users", workerId), values);
+  if (!["guard", "staff"].includes(editingWorker.role) || !["kokubunji", "mitaka"].includes(editingWorker.branchId)) return;
+  await setDoc(doc(db, "shiftCandidateProfiles", workerId), {
     uid: workerId, employeeNumber: editingWorker.employeeNumber, name: form.name,
     nearestStation: form.nearestStation, branchId: editingWorker.branchId,
     accountStatus: editingWorker.accountStatus, updatedAt: serverTimestamp()
+  }).catch(error => {
+    console.warn("登録情報は保存しましたが、シフト候補情報を同期できませんでした", {
+      code: error?.code,
+      workerId,
+      error
+    });
   });
-  return batch.commit();
 }
 
 function appendTextCell(row, value) {
@@ -712,7 +753,7 @@ function roleLabel(role) {
 }
 
 function inputModeLabel(mode) {
-  return mode === "managed" ? "代理入力" : "Web利用";
+  return mode === "managed" ? "内勤者入力" : "Web利用";
 }
 
 function showMessage(target, text, error) {

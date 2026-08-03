@@ -1,5 +1,5 @@
-import { db } from "./firebase-config.js";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { auth, db } from "./firebase-config.js";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, setDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { ALL_BRANCHES, branchName, effectiveBranchId, isOperationalAccount } from "./branches.js";
 
 let el;
@@ -8,27 +8,56 @@ let currentProfile;
 let currentRole;
 let activeFilter = "all";
 let createWorkerMenu;
+let notify;
+let proxyTargetUid = "";
+let selectedDate = "";
+let stopAvailabilityObserver = null;
+let availabilityObserverKey = "";
+let latestAvailabilitySnapshot = null;
+let latestUsersSnapshot = null;
+let latestRolesSnapshot = null;
+let renderGeneration = 0;
+const pendingProxyCells = new Set();
 const ROLE_SORT_ORDER = { guard: 0, staff: 1, admin: 2 };
 
-export function initAdmin(elements, showScreen, workerMenuFactory) {
+export function initAdmin(elements, showScreen, workerMenuFactory, showToast) {
   el = elements;
   navigate = showScreen;
   createWorkerMenu = workerMenuFactory;
-  const today = toLocalDateKey(new Date());
+  notify = showToast;
+  const today = toLocalDateKey(new Date()).slice(0, 7);
   el.adminDate.value = today;
   el.adminSearchButton.addEventListener("click", renderAdmin);
   el.adminClearButton.addEventListener("click", () => { el.adminSearch.value = ""; renderAdmin(); });
-  el.adminDate.addEventListener("change", renderAdmin);
+  el.adminDate.addEventListener("change", () => { resetSelectedDateAndFilter(); renderAdmin(); });
   el.adminPrevDay.addEventListener("click", () => moveDate(-1));
-  el.adminToday.addEventListener("click", () => { el.adminDate.value = toLocalDateKey(new Date()); renderAdmin(); });
+  el.adminToday.addEventListener("click", () => { resetSelectedDateAndFilter(); el.adminDate.value = toLocalDateKey(new Date()).slice(0, 7); renderAdmin(); });
   el.adminNextDay.addEventListener("click", () => moveDate(1));
   el.adminFilters.addEventListener("click", event => {
     const button = event.target.closest("button[data-filter]");
     if (!button) return;
+    if (button.dataset.filter !== "all" && !selectedDate) {
+      notify?.("先に日付を選択してください。");
+      return;
+    }
     activeFilter = button.dataset.filter;
-    el.adminFilters.querySelectorAll("button").forEach(item => item.classList.toggle("active", item === button));
+    updateFilterButtons();
     renderAdmin();
   });
+}
+
+export function stopAdminObserver() {
+  stopAvailabilityObserver?.();
+  stopAvailabilityObserver = null;
+  availabilityObserverKey = "";
+  latestAvailabilitySnapshot = null;
+  latestUsersSnapshot = null;
+  latestRolesSnapshot = null;
+  proxyTargetUid = "";
+  selectedDate = "";
+  activeFilter = "all";
+  pendingProxyCells.clear();
+  if (el?.adminFilters) updateFilterButtons();
 }
 
 export async function showAdmin(profile = currentProfile, roleData = currentRole) {
@@ -36,44 +65,54 @@ export async function showAdmin(profile = currentProfile, roleData = currentRole
   if (roleData) currentRole = roleData;
   if (!["staff", "admin"].includes(currentRole?.role)) throw new Error("管理画面を開く権限がありません。");
   navigate("admin");
+  updateFilterButtons();
   await renderAdmin();
 }
 
 export function removeInactiveAccountFromAdmin(worker, accountStatus) {
   if (!worker || isOperationalAccount(accountStatus)) return;
-  const accountId = worker.uid || worker.id;
-  if (!accountId) return;
-  [el.adminTableBody, el.adminCards].forEach(container => {
-    container.querySelectorAll("[data-account-id]").forEach(item => {
-      if (item.dataset.accountId === accountId) item.remove();
-    });
-  });
-  if (!el.adminTableBody.children.length) {
-    el.adminTableBody.innerHTML = '<tr><td colspan="4">該当する利用者はいません</td></tr>';
-  }
+  renderAdmin();
 }
 
 async function renderAdmin() {
+  const generation = ++renderGeneration;
   const branchId = effectiveBranchId(currentRole);
   const allBranches = currentRole.role === "admin" && branchId === ALL_BRANCHES;
   const isAdminView = currentRole.role === "admin";
-  const date = el.adminDate.value;
-  el.adminDateLabel.textContent = `${date} の勤務希望`;
+  const monthValue = /^\d{4}-\d{2}$/.test(el.adminDate.value)
+    ? el.adminDate.value
+    : toLocalDateKey(new Date()).slice(0, 7);
+  el.adminDate.value = monthValue;
+  const [year, month] = monthValue.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstDate = `${monthValue}-01`;
+  const lastDate = `${monthValue}-${String(daysInMonth).padStart(2, "0")}`;
+  el.adminDateLabel.textContent = `${year}年${month}月 勤務日程表`;
   // adminは支社に所属しないため、特定支社表示でも全usersからadminを合流して絞り込む。
   const usersQuery = isAdminView
     ? collection(db, "users")
     : query(collection(db, "users"), where("branchId", "==", branchId));
   const availabilityQuery = allBranches
-    ? query(collection(db, "availability"), where("date", "==", date))
-    : query(collection(db, "availability"), where("branchId", "==", branchId), where("date", "==", date));
+    ? query(collection(db, "availability"), where("date", ">=", firstDate), where("date", "<=", lastDate))
+    : query(collection(db, "availability"), where("branchId", "==", branchId),
+      where("date", ">=", firstDate), where("date", "<=", lastDate));
+  const availabilityFallbackQuery = allBranches
+    ? null
+    : query(collection(db, "availability"), where("branchId", "==", branchId));
+  ensureAvailabilityObserver(availabilityQuery, `${branchId}|${firstDate}|${lastDate}|${allBranches}`, availabilityFallbackQuery);
   const rolesQuery = isAdminView
     ? collection(db, "userRoles")
     : query(collection(db, "userRoles"), where("branchId", "==", branchId));
   const [usersSnapshot, availabilitySnapshot, rolesSnapshot] = await Promise.all([
-    getDocs(usersQuery),
-    getDocs(availabilityQuery),
-    getDocs(rolesQuery)
+    latestUsersSnapshot ? Promise.resolve(latestUsersSnapshot) : getDocs(usersQuery),
+    latestAvailabilitySnapshot
+      ? Promise.resolve(latestAvailabilitySnapshot)
+      : getDocs(availabilityFallbackQuery || availabilityQuery),
+    latestRolesSnapshot ? Promise.resolve(latestRolesSnapshot) : getDocs(rolesQuery)
   ]);
+  if (generation !== renderGeneration) return;
+  latestUsersSnapshot = usersSnapshot;
+  latestRolesSnapshot = rolesSnapshot;
   const roles = createRoleLookup(rolesSnapshot);
   // 新旧データでusersの文書IDとAuthentication UIDが異なる場合も、
   // authUid / uid / workerIdを使ってuserRolesへ安全に結合する。
@@ -94,11 +133,15 @@ async function renderAdmin() {
   const availability = new Map();
   availabilitySnapshot.docs.forEach(item => {
     const data = item.data();
+    const date = data.date;
+    if (date < firstDate || date > lastDate) return;
     const uid = resolveAvailabilityUid(item.id, data, date, usersByUid, usersByEmployeeNumber);
     if (!uid) return;
-    const previous = availability.get(uid);
+    if (!availability.has(uid)) availability.set(uid, new Map());
+    const byDate = availability.get(uid);
+    const previous = byDate.get(date);
     if (!previous || timestampMillis(data.updatedAt) >= timestampMillis(previous.updatedAt)) {
-      availability.set(uid, data);
+      byDate.set(date, data);
     }
   });
   const search = el.adminSearch.value.trim().toLowerCase();
@@ -114,59 +157,379 @@ async function renderAdmin() {
       accountStatus: roleData?.accountStatus,
       disabledAt: roleData?.disabledAt ?? user.disabledAt ?? null,
       disabledByUid: roleData?.disabledByUid ?? user.disabledByUid ?? "",
-      shift: availability.get(user.uid)
+      monthlyAvailability: availability.get(user.uid) || new Map()
     };
   })
     .filter(user => isVisibleAccount(user) &&
       (allBranches || user.role === "admin" || user.branchId === branchId))
-    .filter(user => matchesFilter(user.shift))
+    .filter(user => user.uid === proxyTargetUid || matchesSelectedDateFilter(user.monthlyAvailability))
     .filter(user => !search || `${user.employeeNumber} ${user.name} ${user.city}`.toLowerCase().includes(search))
-    .sort((a, b) => (ROLE_SORT_ORDER[a.role] ?? 99) - (ROLE_SORT_ORDER[b.role] ?? 99) ||
-      Number(a.employeeNumber || Number.MAX_SAFE_INTEGER) - Number(b.employeeNumber || Number.MAX_SAFE_INTEGER) ||
-      String(a.employeeNumber || "").localeCompare(String(b.employeeNumber || ""), "ja"));
+    .sort((a, b) => compareWorkerNames(a, b));
+  renderScheduleHeader(year, month, daysInMonth);
   el.adminTableBody.replaceChildren();
   el.adminCards.replaceChildren();
   rows.forEach(user => {
-    const shift = user.shift || {};
-    const status = shift.unavailable ? "不可" : shift.undecided ? "未定" :
-      shift.day && shift.night ? "日勤・夜勤" : shift.day ? "日勤" : shift.night ? "夜勤" : "未入力";
-    const tr = document.createElement("tr");
-    tr.className = "admin-summary-row";
-    tr.dataset.accountId = user.uid || user.id;
+    const dayRow = document.createElement("tr");
+    const nightRow = document.createElement("tr");
+    dayRow.dataset.accountId = user.uid || user.id;
+    nightRow.dataset.accountId = user.uid || user.id;
     const identityCell = document.createElement("td");
-    identityCell.append(
-      summaryLine(user.employeeNumber || "―", "admin-summary-number"),
-      summaryRoleLine(user),
-      ...(allBranches ? [summaryLine(`支社：${displayBranchName(user)}`, "admin-summary-branch")] : [])
-    );
-    const wishCell = document.createElement("td");
-    wishCell.append(summaryLine(status, "admin-summary-status"));
-    const contactCell = document.createElement("td");
-    contactCell.append(
-      summaryLine(`〒${user.postalCode || "―"}　${user.prefecture || ""}${user.city || ""}${user.addressLine || ""}${user.building || ""}`),
-      summaryLine(`最寄り駅：${user.nearestStation || "―"}`),
-      summaryLine(`メール：${user.contactEmail || "―"}`)
-    );
-    const actionCell = document.createElement("td");
-    actionCell.appendChild(createWorkerMenu(user, currentProfile, currentRole));
-    tr.append(identityCell, wishCell, contactCell, actionCell);
-    el.adminTableBody.appendChild(tr);
-    const card = document.createElement("article");
-    card.className = "admin-card";
-    card.dataset.accountId = user.uid || user.id;
-    const heading = document.createElement("div");
-    heading.className = "admin-card-heading";
-    appendRoleName(heading, user);
-    if (allBranches) heading.appendChild(summaryLine(displayBranchName(user), "admin-summary-branch"));
-    const details = document.createElement("div");
-    details.className = "admin-card-details";
-    details.textContent = `${user.employeeNumber}\n${status}\n` +
-      `${user.prefecture}${user.city}${user.addressLine}${user.building || ""}\n最寄り駅：${user.nearestStation || "―"}\n${user.contactEmail}`;
-    card.append(heading, details);
-    card.appendChild(createWorkerMenu(user, currentProfile, currentRole));
-    el.adminCards.appendChild(card);
+    identityCell.className = "schedule-name-cell";
+    identityCell.rowSpan = 2;
+    const person = document.createElement("div");
+    person.className = "schedule-person";
+    const text = document.createElement("div");
+    const number = document.createElement("span");
+    number.className = "schedule-person-number";
+    number.textContent = user.employeeNumber || "―";
+    const name = document.createElement("span");
+    name.className = "schedule-person-name";
+    name.textContent = user.name || "氏名未登録";
+    name.title = user.name || "氏名未登録";
+    text.append(number, name);
+    if (allBranches) text.appendChild(summaryLine(displayBranchName(user), "schedule-person-number"));
+    if (proxyTargetUid === user.uid) {
+      const proxyLabel = document.createElement("span");
+      proxyLabel.className = "proxy-active-label";
+      proxyLabel.textContent = "勤務希望を編集中";
+      text.appendChild(proxyLabel);
+      identityCell.classList.add("is-proxy-target-name");
+      dayRow.classList.add("is-proxy-target", "is-proxy-target-day");
+      nightRow.classList.add("is-proxy-target", "is-proxy-target-night");
+    }
+    if (proxyTargetUid === user.uid) {
+      const finishButton = document.createElement("button");
+      finishButton.type = "button";
+      finishButton.className = "proxy-complete-button";
+      finishButton.textContent = "✓";
+      finishButton.setAttribute("aria-label", `${user.name || user.employeeNumber}の勤務希望編集を保存して終了`);
+      finishButton.disabled = hasPendingProxySave(user.uid);
+      finishButton.addEventListener("click", () => endTableProxyInput(user.uid));
+      person.append(text, finishButton);
+    } else {
+      const workerMenu = createWorkerMenu(user, currentProfile, currentRole);
+      addTableProxyMenuAction(workerMenu, user);
+      person.append(text, workerMenu);
+    }
+    identityCell.appendChild(person);
+    dayRow.append(identityCell, scheduleShiftLabel("日勤"));
+    nightRow.append(scheduleShiftLabel("夜勤"));
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = `${monthValue}-${String(day).padStart(2, "0")}`;
+      const wish = user.monthlyAvailability.get(date);
+      dayRow.appendChild(scheduleMarkCell(wish, "day", user, date));
+      nightRow.appendChild(scheduleMarkCell(wish, "night", user, date));
+    }
+    el.adminTableBody.append(dayRow, nightRow);
   });
-  if (!rows.length) el.adminTableBody.innerHTML = '<tr><td colspan="4">該当する利用者はいません</td></tr>';
+  if (!rows.length) {
+    const emptyRow = document.createElement("tr");
+    const emptyCell = document.createElement("td");
+    emptyCell.colSpan = daysInMonth + 2;
+    emptyCell.textContent = "該当する利用者はいません";
+    emptyRow.appendChild(emptyCell);
+    el.adminTableBody.appendChild(emptyRow);
+  }
+  applySelectedDateHighlight();
+}
+
+function ensureAvailabilityObserver(availabilityQuery, key, fallbackQuery = null) {
+  if (availabilityObserverKey === key && stopAvailabilityObserver) return;
+  stopAvailabilityObserver?.();
+  availabilityObserverKey = key;
+  latestAvailabilitySnapshot = null;
+  latestUsersSnapshot = null;
+  latestRolesSnapshot = null;
+  const handleSnapshot = snapshot => {
+    latestAvailabilitySnapshot = snapshot;
+    if (el.adminScreen.classList.contains("active")) renderAdmin().catch(reportAdminError);
+  };
+  const handleError = error => {
+    console.error("勤務希望一覧のリアルタイム取得に失敗しました", { code: error?.code, error });
+    if (error?.code === "failed-precondition" && fallbackQuery && availabilityObserverKey === key) {
+      console.warn("複合インデックス構築中のため、自支社データ取得へ切り替えます");
+      stopAvailabilityObserver = onSnapshot(fallbackQuery, handleSnapshot, reportAdminError);
+      return;
+    }
+    reportAdminError(error);
+  };
+  stopAvailabilityObserver = onSnapshot(availabilityQuery, handleSnapshot, handleError);
+}
+
+function reportAdminError(error) {
+  console.error("管理画面の勤務希望一覧を更新できませんでした", { code: error?.code, error });
+  notify?.(error?.code === "permission-denied"
+    ? "勤務希望一覧を表示する権限がありません。所属支社とアカウント状態を確認してください。"
+    : "勤務希望一覧を更新できませんでした。時間をおいて再度お試しください。");
+}
+
+function renderScheduleHeader(year, month, daysInMonth) {
+  const row = document.createElement("tr");
+  const name = document.createElement("th");
+  name.className = "schedule-name-head";
+  name.textContent = "警備員";
+  const shift = document.createElement("th");
+  shift.className = "schedule-shift-head";
+  shift.textContent = "区分";
+  row.append(name, shift);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(year, month - 1, day);
+    const cell = document.createElement("th");
+    cell.className = `schedule-day-header ${date.getDay() === 0 ? "is-sunday" : date.getDay() === 6 ? "is-saturday" : ""}`.trim();
+    const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    cell.dataset.date = dateKey;
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "button");
+    cell.setAttribute("aria-label", `${month}月${day}日を選択`);
+    cell.setAttribute("aria-pressed", String(selectedDate === dateKey));
+    cell.addEventListener("click", () => toggleSelectedDate(dateKey));
+    cell.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleSelectedDate(dateKey);
+    });
+    cell.innerHTML = `${day}<br><small>${"日月火水木金土"[date.getDay()]}</small>`;
+    row.appendChild(cell);
+  }
+  el.adminTableHead.replaceChildren(row);
+}
+
+function scheduleShiftLabel(label) {
+  const cell = document.createElement("th");
+  cell.scope = "row";
+  cell.className = "schedule-shift-label";
+  cell.textContent = label;
+  return cell;
+}
+
+function scheduleMarkCell(wish, shiftType, user, date) {
+  const cell = document.createElement("td");
+  cell.className = "schedule-mark";
+  cell.dataset.date = date;
+  applyScheduleMark(cell, wish, shiftType);
+  if (proxyTargetUid === user.uid && canStartTableProxy(user)) {
+    cell.classList.add("is-proxy-editable");
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "button");
+    cell.setAttribute("aria-label", `${user.name} ${date} ${shiftType === "day" ? "日勤" : "夜勤"}を変更`);
+    const activate = () => saveProxyCellChange(cell, wish, shiftType, user, date);
+    cell.addEventListener("click", activate);
+    cell.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      activate();
+    });
+    if (pendingProxyCells.has(`${user.uid}_${date}_${shiftType}`)) {
+      cell.classList.add("is-saving");
+      cell.setAttribute("aria-disabled", "true");
+    }
+  }
+  return cell;
+}
+
+function toggleSelectedDate(date) {
+  const wasFiltering = activeFilter !== "all";
+  selectedDate = selectedDate === date ? "" : date;
+  if (!selectedDate && activeFilter !== "all") {
+    activeFilter = "all";
+    updateFilterButtons();
+  }
+  if (wasFiltering || activeFilter !== "all") renderAdmin().catch(reportAdminError);
+  else applySelectedDateHighlight();
+}
+
+function applySelectedDateHighlight() {
+  el.adminTableHead.querySelectorAll("[data-date]").forEach(cell => {
+    const selected = Boolean(selectedDate) && cell.dataset.date === selectedDate;
+    cell.classList.toggle("is-selected-date", selected);
+    cell.setAttribute("aria-pressed", String(selected));
+  });
+  el.adminTableBody.querySelectorAll("[data-date]").forEach(cell => {
+    cell.classList.toggle("is-selected-date", Boolean(selectedDate) && cell.dataset.date === selectedDate);
+  });
+}
+
+function applyScheduleMark(cell, wish, shiftType) {
+  cell.textContent = "";
+  cell.classList.remove("is-available", "is-unavailable");
+  const state = scheduleCellState(wish, shiftType);
+  cell.dataset.state = state;
+  if (state === "available") {
+    cell.textContent = "○";
+    cell.classList.add("is-available");
+    cell.title = shiftType === "day" ? "日勤希望" : "夜勤希望";
+  } else if (state === "unavailable") {
+    cell.textContent = "×";
+    cell.classList.add("is-unavailable");
+    cell.title = shiftType === "day" ? "日勤不可" : "夜勤不可";
+  } else {
+    cell.title = shiftType === "day" ? "日勤未入力" : "夜勤未入力";
+  }
+}
+
+function scheduleCellState(wish, shiftType) {
+  if (!wish || wish.undecided) return "blank";
+  const enteredField = `${shiftType}Entered`;
+  const entered = Object.hasOwn(wish, enteredField) ? Boolean(wish[enteredField]) : true;
+  if (!entered) return "blank";
+  return wish[shiftType] ? "available" : "unavailable";
+}
+
+function nextScheduleCellState(state) {
+  if (state === "blank") return "available";
+  if (state === "available") return "unavailable";
+  return "blank";
+}
+
+function addTableProxyMenuAction(workerMenu, user) {
+  if (!canStartTableProxy(user)) return;
+  const menu = workerMenu.querySelector(".worker-action-menu");
+  if (!menu) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "勤務希望を編集";
+  button.addEventListener("click", () => {
+    workerMenu.querySelector(".worker-action-menu-button")?.click();
+    startTableProxyInput(user);
+  });
+  menu.prepend(button);
+}
+
+function canStartTableProxy(user) {
+  if (!auth.currentUser || !["staff", "admin"].includes(currentRole?.role)) return false;
+  if (!user.uid || !["guard", "staff", "admin"].includes(user.role)) return false;
+  if (currentRole.role === "admin") return true;
+  return user.role !== "admin" && user.branchId === effectiveBranchId(currentRole);
+}
+
+function startTableProxyInput(user) {
+  proxyTargetUid = user.uid;
+  renderAdmin().catch(reportAdminError);
+}
+
+function endTableProxyInput(targetUid = proxyTargetUid) {
+  if (hasPendingProxySave(targetUid)) {
+    notify?.("保存処理が完了するまでお待ちください。");
+    return;
+  }
+  proxyTargetUid = "";
+  renderAdmin().catch(reportAdminError);
+}
+
+function hasPendingProxySave(uid) {
+  const prefix = `${uid}_`;
+  return [...pendingProxyCells].some(key => key.startsWith(prefix));
+}
+
+function updateFilterButtons() {
+  el.adminFilters.querySelectorAll("button[data-filter]").forEach(button => {
+    const active = button.dataset.filter === activeFilter;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
+function resetSelectedDateAndFilter() {
+  selectedDate = "";
+  activeFilter = "all";
+  updateFilterButtons();
+}
+
+async function saveProxyCellChange(cell, wish, shiftType, user, date) {
+  const key = `${user.uid}_${date}_${shiftType}`;
+  if (pendingProxyCells.has(key) || proxyTargetUid !== user.uid) return;
+  const previousState = cell.dataset.state || scheduleCellState(wish, shiftType);
+  const nextState = nextScheduleCellState(previousState);
+  pendingProxyCells.add(key);
+  cell.classList.add("is-saving");
+  cell.setAttribute("aria-disabled", "true");
+  try {
+    const saved = await writeProxyAvailabilityCell(user, date, shiftType, nextState);
+    applyScheduleMark(cell, saved, shiftType);
+  } catch (error) {
+    console.error("勤務希望の編集に失敗しました", { error, targetUid: user.uid, date, shiftType });
+    applyScheduleMark(cell, wish, shiftType);
+    notify?.(error?.code === "permission-denied"
+      ? "この勤務希望を変更する権限がありません。"
+      : error?.code === "failed-precondition"
+        ? "管理者自身の勤務希望を変更する場合は、先に表示する支社を選択してください。"
+        : "勤務希望を保存できませんでした。直前の表示へ戻しました。");
+  } finally {
+    pendingProxyCells.delete(key);
+    cell.classList.remove("is-saving");
+    cell.removeAttribute("aria-disabled");
+    renderAdmin().catch(reportAdminError);
+  }
+}
+
+async function writeProxyAvailabilityCell(user, date, shiftType, nextState) {
+  const operatorUid = auth.currentUser?.uid || "";
+  if (!operatorUid || !canStartTableProxy(user)) throw Object.assign(new Error("proxy not allowed"), { code: "permission-denied" });
+  const reference = doc(db, "availability", `${date}_${user.uid}`);
+  const result = await runTransaction(db, async transaction => {
+    const snapshot = await transaction.get(reference);
+    const current = snapshot.exists() ? snapshot.data() : null;
+    const values = {
+      day: Boolean(current?.day),
+      night: Boolean(current?.night),
+      dayEntered: current ? (Object.hasOwn(current, "dayEntered") ? Boolean(current.dayEntered) : !current.undecided) : false,
+      nightEntered: current ? (Object.hasOwn(current, "nightEntered") ? Boolean(current.nightEntered) : !current.undecided) : false
+    };
+    values[shiftType] = nextState === "available";
+    values[`${shiftType}Entered`] = nextState !== "blank";
+    const isSelfEdit = operatorUid === user.uid;
+    const selectedBranchId = effectiveBranchId(currentRole);
+    const writeBranchId = user.branchId || current?.branchId ||
+      (selectedBranchId !== ALL_BRANCHES ? selectedBranchId : "");
+    if (!writeBranchId) {
+      throw Object.assign(new Error("branch selection required"), { code: "failed-precondition" });
+    }
+    const data = {
+      uid: user.uid,
+      branchId: writeBranchId,
+      date,
+      day: values.day,
+      night: values.night,
+      dayEntered: values.dayEntered,
+      nightEntered: values.nightEntered,
+      unavailable: values.dayEntered && values.nightEntered && !values.day && !values.night,
+      undecided: false,
+      note: String(current?.note || ""),
+      updatedByUid: operatorUid,
+      updatedByName: String(currentProfile?.name || "").slice(0, 80),
+      updatedByType: isSelfEdit ? "self" : "proxy",
+      updatedByRole: isSelfEdit ? "" : currentRole.role,
+      updateReason: isSelfEdit ? "" : "staff_correction",
+      updateReasonNote: "",
+      updatedAfterDeadline: isSelfEdit ? false : isAfterAvailabilityDeadline(date, shiftType),
+      updatedAt: serverTimestamp()
+    };
+    if (snapshot.exists()) transaction.update(reference, data);
+    else transaction.set(reference, { ...data, createdAt: serverTimestamp() });
+    return data;
+  });
+  await setDoc(doc(db, "shiftCandidateAvailability", `${date}_${user.uid}`), {
+    uid: user.uid, branchId: result.branchId, date,
+    day: result.day, night: result.night, unavailable: result.unavailable,
+    undecided: false, note: result.note, updatedAt: serverTimestamp()
+  }).catch(error => console.warn("シフト候補データを同期できませんでした", error));
+  return result;
+}
+
+function isAfterAvailabilityDeadline(dateKey, shiftType) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const deadline = new Date(year, month - 1, day - 1, shiftType === "night" ? 12 : 0, 0, 0);
+  return new Date() >= deadline;
+}
+
+function compareWorkerNames(left, right) {
+  return workerReading(left).localeCompare(workerReading(right), "ja", { sensitivity: "base" });
+}
+
+function workerReading(user) {
+  return String(user.furigana || user.nameKana || user.kana || user.name || "")
+    .normalize("NFKC")
+    .replace(/[ァ-ヶ]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60));
 }
 
 function resolveFormalBranchId(user, roleData) {
@@ -302,11 +665,11 @@ export async function reviewStaffRequest(requestItem, decision) {
   await batch.commit();
 }
 
-function moveDate(days) {
-  const [year, month, day] = el.adminDate.value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  date.setDate(date.getDate() + days);
-  el.adminDate.value = toLocalDateKey(date);
+function moveDate(months) {
+  const [year, month] = el.adminDate.value.split("-").map(Number);
+  const date = new Date(year, month - 1 + months, 1);
+  resetSelectedDateAndFilter();
+  el.adminDate.value = toLocalDateKey(date).slice(0, 7);
   renderAdmin();
 }
 
@@ -333,14 +696,12 @@ function timestampMillis(value) {
   return value?.toMillis?.() ?? value?.toDate?.().getTime?.() ?? 0;
 }
 
-function matchesFilter(shift) {
-  if (activeFilter === "all") return true;
-  if (activeFilter === "none") return !shift;
-  if (!shift) return false;
-  if (activeFilter === "day") return shift.day;
-  if (activeFilter === "night") return shift.night;
-  if (activeFilter === "both") return shift.day && shift.night;
-  if (activeFilter === "unavailable") return shift.unavailable;
-  if (activeFilter === "undecided") return shift.undecided;
-  return true;
+function matchesSelectedDateFilter(byDate) {
+  if (activeFilter === "all" || !selectedDate) return true;
+  const wish = byDate.get(selectedDate);
+  if (activeFilter === "none") {
+    return scheduleCellState(wish, "day") === "blank" && scheduleCellState(wish, "night") === "blank";
+  }
+  if (!wish || wish.undecided) return false;
+  return scheduleCellState(wish, activeFilter) === "available";
 }

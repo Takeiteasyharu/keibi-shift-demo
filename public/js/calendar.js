@@ -1,5 +1,5 @@
 import { auth } from "./firebase-config.js";
-import { getAvailability, saveAvailability } from "./availability.js?v=20260803-6";
+import { getAvailability, saveAvailability } from "./availability.js?v=20260803-8";
 import { loadOwnConfirmedShifts } from "./shifts.js?v=20260803-1";
 
 const HOLIDAYS_2026 = {
@@ -25,6 +25,7 @@ const state = {
   profile: null,
   proxy: false,
   operatorUid: "",
+  operatorName: "",
   operatorRole: "",
   inputMode: "web",
   pendingSave: null,
@@ -46,6 +47,7 @@ export function resetCalendarState() {
   state.profile = null;
   state.proxy = false;
   state.operatorUid = "";
+  state.operatorName = "";
   state.operatorRole = "";
   state.inputMode = "web";
   state.pendingSave = null;
@@ -63,6 +65,8 @@ export function resetCalendarState() {
   el.shiftModalBackdrop.classList.remove("show");
   el.proxyReasonModal.classList.remove("show");
   el.shiftNote.value = "";
+  el.availabilityAudit.hidden = true;
+  el.availabilityAudit.textContent = "";
 }
 
 export function initCalendar(elements, showToast) {
@@ -75,10 +79,10 @@ export function initCalendar(elements, showToast) {
   el.shiftModalBackdrop.addEventListener("click", event => {
     if (event.target === el.shiftModalBackdrop) closeModal();
   });
-  el.choiceDay.addEventListener("click", () => toggleDraft("day"));
-  el.choiceNight.addEventListener("click", () => toggleDraft("night"));
-  el.choiceUnavailable.addEventListener("click", () => toggleDraft("unavailable"));
-  el.choiceUndecided.addEventListener("click", () => toggleDraft("undecided"));
+  el.choiceDay.addEventListener("click", () => selectDraft("day"));
+  el.choiceNight.addEventListener("click", () => selectDraft("night"));
+  el.choiceBoth.addEventListener("click", () => selectDraft("both"));
+  el.choiceUnavailable.addEventListener("click", () => selectDraft("unavailable"));
   el.saveShiftButton.addEventListener("click", save);
   el.exitProxyInputButton.addEventListener("click", () => state.returnAction?.());
   el.proxyUpdateReason.addEventListener("change", updateReasonNoteVisibility);
@@ -107,6 +111,7 @@ export function showCalendar(profile, options = {}) {
   state.profile = { ...profile, uid: targetUid };
   state.proxy = proxy;
   state.operatorUid = proxy ? options.operatorUid : authUid;
+  state.operatorName = proxy ? String(options.operatorName || "") : String(profile.name || "");
   state.operatorRole = options.operatorRole || "";
   state.inputMode = options.inputMode || profile.inputMode || "web";
   state.pendingSave = null;
@@ -118,10 +123,10 @@ export function showCalendar(profile, options = {}) {
   el.proxyInputBanner.hidden = !state.proxy;
   if (state.proxy) {
     const isWeb = state.inputMode === "web";
-    el.proxyInputTitle.textContent = isWeb ? "Web利用者の勤務希望を代理入力中" : "代理入力中";
+    el.proxyInputTitle.textContent = isWeb ? "Web利用者の勤務希望を編集中" : "勤務希望を編集中";
     el.proxyInputEmployeeNumber.textContent = `警備員番号：${profile.employeeNumber}`;
     el.proxyInputName.textContent = `氏名：${profile.name}`;
-    el.proxyInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "代理入力"}`;
+    el.proxyInputMode.textContent = `利用方法：${isWeb ? "Web利用" : "内勤者入力"}`;
     el.proxyInputWarning.hidden = !isWeb;
   }
   renderCalendar();
@@ -204,6 +209,7 @@ function openModal(dateKey) {
   el.confirmedShiftDetails.hidden = !confirmed;
   if (confirmed) el.confirmedShiftDetails.textContent = `${confirmed.title}\n${confirmed.clientName}\n${confirmed.address}\n集合：${confirmed.meetingPlace || "―"} ${confirmed.meetingTime}\n勤務：${confirmed.startTime}～${confirmed.endTime}\n役割：${confirmed.leaderUid === state.profile.uid ? "隊長" : "隊員"}`;
   el.shiftNote.value = state.draft.note;
+  renderAvailabilityAudit(state.draft);
   const lock = getLockState(dateKey);
   const past = isPastDate(dateKey);
   const afterDeadline = past || lock.dayLocked || lock.nightLocked;
@@ -226,22 +232,14 @@ function closeModal(force = false) {
   el.shiftModalBackdrop.classList.remove("show");
 }
 
-function toggleDraft(kind) {
+function selectDraft(kind) {
   if (!state.proxy && confirmedByDate.has(state.selectedDate)) return;
   const lock = getLockState(state.selectedDate);
   if (!state.proxy && isPastDate(state.selectedDate)) return;
-  if (!state.proxy && ((kind === "day" && lock.dayLocked) || (kind === "night" && lock.nightLocked))) return;
-  if (!state.proxy && (kind === "unavailable" || kind === "undecided") && (lock.dayLocked || lock.nightLocked)) return;
-
-  if (kind === "unavailable" || kind === "undecided") {
-    const nextValue = !state.draft[kind];
-    state.draft = emptyAvailability();
-    state.draft[kind] = nextValue;
-  } else {
-    state.draft[kind] = !state.draft[kind];
-    state.draft.unavailable = false;
-    state.draft.undecided = false;
-  }
+  const next = availabilityForChoice(kind, state.draft.note);
+  if (!state.proxy && ((lock.dayLocked && next.day !== Boolean(state.draft.day))
+    || (lock.nightLocked && next.night !== Boolean(state.draft.night)))) return;
+  state.draft = next;
   updateChoiceButtons();
 }
 
@@ -250,18 +248,24 @@ function updateChoiceButtons() {
   const past = isPastDate(state.selectedDate);
   const confirmedReadOnly = !state.proxy && confirmedByDate.has(state.selectedDate);
   const pairs = [
-    [el.choiceDay, "day", !state.proxy && (past || lock.dayLocked)],
-    [el.choiceNight, "night", !state.proxy && (past || lock.nightLocked)],
-    [el.choiceUnavailable, "unavailable", !state.proxy && (past || lock.dayLocked || lock.nightLocked)],
-    [el.choiceUndecided, "undecided", !state.proxy && (past || lock.dayLocked || lock.nightLocked)]
+    [el.choiceDay, "day"],
+    [el.choiceNight, "night"],
+    [el.choiceBoth, "both"],
+    [el.choiceUnavailable, "unavailable"]
   ];
-  pairs.forEach(([button, key, disabled]) => {
-    button.classList.toggle("selected", state.draft[key]);
-    button.setAttribute("aria-pressed", String(state.draft[key]));
-    button.disabled = state.saving || confirmedReadOnly || disabled;
+  pairs.forEach(([button, key]) => {
+    const candidate = availabilityForChoice(key, state.draft.note);
+    const selected = availabilityChoiceKey(state.draft) === key;
+    const changesLockedValue = !state.proxy && ((lock.dayLocked && candidate.day !== Boolean(state.draft.day))
+      || (lock.nightLocked && candidate.night !== Boolean(state.draft.night)));
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.disabled = state.saving || confirmedReadOnly || (!state.proxy && past) || changesLockedValue;
   });
-  el.choiceDay.textContent = !state.proxy && lock.dayLocked ? "日勤 締切済み" : "日勤を希望する";
-  el.choiceNight.textContent = !state.proxy && lock.nightLocked ? "夜勤 締切済み" : "夜勤を希望する";
+  el.choiceDay.textContent = "日勤";
+  el.choiceNight.textContent = "夜勤";
+  el.choiceBoth.textContent = "日勤・夜勤";
+  el.choiceUnavailable.textContent = "勤務不可";
 }
 
 async function save() {
@@ -276,6 +280,10 @@ async function save() {
   if (!state.proxy && (isPastDate(state.selectedDate) || (lock.dayLocked && lock.nightLocked))) return;
   const existing = normalizeAvailability(getAvailability(state.selectedDate));
   const next = normalizeAvailability({ ...state.draft, note: el.shiftNote.value });
+  if (!availabilityChoiceKey(next)) {
+    notify("勤務希望を選択してください。");
+    return;
+  }
   if (!state.proxy && lock.dayLocked) next.day = existing.day;
   if (!state.proxy && lock.nightLocked) next.night = existing.night;
   if (sameAvailability(existing, next)) {
@@ -302,6 +310,7 @@ async function performSave(next, afterDeadline, reason = "", reasonNote = "") {
     selectedDate: state.selectedDate,
     branchId: state.profile?.branchId || "",
     operatorUid: state.proxy ? state.operatorUid : authUid,
+    operatorName: state.proxy ? state.operatorName : state.profile?.name || "",
     operatorRole: state.operatorRole,
     profileName: state.profile?.name || ""
   };
@@ -339,6 +348,7 @@ async function performSave(next, afterDeadline, reason = "", reasonNote = "") {
     }
     await saveAvailability(context.targetUid, context.selectedDate, next, context.branchId, {
       updatedByUid: context.operatorUid,
+      updatedByName: context.operatorName,
       updatedByType: context.proxy ? "proxy" : "self",
       updatedByRole: context.proxy ? context.operatorRole : "",
       updateReason: context.proxy ? reason : "",
@@ -349,7 +359,7 @@ async function performSave(next, afterDeadline, reason = "", reasonNote = "") {
     state.saving = false;
     closeModal(true);
     renderCalendar();
-    notify(context.proxy ? `${context.profileName}さんの勤務希望を代理入力しました。` : "勤務希望を保存しました。");
+    notify(context.proxy ? `${context.profileName}さんの勤務希望を変更しました。` : "勤務希望を保存しました。");
   } catch (error) {
     if (state.selectedDate === context.selectedDate && calendarTargetUid() === context.targetUid) {
       state.draft = normalizeAvailability(getAvailability(context.selectedDate, context.targetUid));
@@ -484,14 +494,46 @@ function emptyAvailability() {
   return { day: false, night: false, unavailable: false, undecided: false, note: "" };
 }
 
+function availabilityForChoice(kind, note = "") {
+  const choices = {
+    day: { day: true, night: false, unavailable: false },
+    night: { day: false, night: true, unavailable: false },
+    both: { day: true, night: true, unavailable: false },
+    unavailable: { day: false, night: false, unavailable: true }
+  };
+  return { ...emptyAvailability(), ...(choices[kind] || {}), note, undecided: false };
+}
+
+function availabilityChoiceKey(value) {
+  const item = normalizeAvailability(value);
+  if (item.unavailable) return "unavailable";
+  if (item.day && item.night) return "both";
+  if (item.day) return "day";
+  if (item.night) return "night";
+  return "";
+}
+
 function normalizeAvailability(value) {
   return { ...emptyAvailability(), ...(value || {}) };
+}
+
+function renderAvailabilityAudit(item) {
+  const date = item?.updatedAt?.toDate?.();
+  if (!date || !item?.updatedByName) {
+    el.availabilityAudit.hidden = true;
+    el.availabilityAudit.textContent = "";
+    return;
+  }
+  const proxy = item.updatedByType === "proxy" ? "（内勤者が変更）" : "";
+  el.availabilityAudit.textContent =
+    `最終更新：${date.toLocaleString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}\n` +
+    `更新者：${item.updatedByName}${proxy}`;
+  el.availabilityAudit.hidden = false;
 }
 
 function getStatus(value) {
   const item = normalizeAvailability(value);
   if (item.unavailable) return { key: "unavailable", label: "不可" };
-  if (item.undecided) return { key: "undecided", label: "未定" };
   if (item.day && item.night) return { key: "both", label: "日夜" };
   if (item.day) return { key: "day", label: "日勤" };
   if (item.night) return { key: "night", label: "夜勤" };

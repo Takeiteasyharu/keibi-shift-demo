@@ -59,6 +59,10 @@ export async function createSelfProgressSection(shift, profile) {
   departureTime.className = "departure-check-time";
   departureTime.textContent = `出発確認時刻：${shift.departureCheckTime || "未設定"}`;
   section.appendChild(departureTime);
+  const audit = document.createElement("div");
+  audit.className = "audit-meta";
+  renderProgressAudit(audit, progress);
+  section.appendChild(audit);
   const controls = [
     ["departureAcknowledgedAt", "出発確認", "出発確認", "出発確認済"],
     ["departedAt", "出発", "出発しました", "出発済"],
@@ -87,6 +91,7 @@ export async function createSelfProgressSection(shift, profile) {
       try {
         progress = await recordSelfProgress(shift, profile, field, departureTime);
         status.textContent = progressStatus(progress, field, doneLabel);
+        renderProgressAudit(audit, progress);
         notify(`${buttonLabel}を記録しました。`);
       } catch (error) {
         console.error(error);
@@ -118,7 +123,8 @@ async function recordSelfProgress(shift, profile, field, departureTime = "") {
       date: shift.date, shiftType: shift.shiftType,
       [field]: serverTimestamp(),
       createdAt: existing.createdAt || serverTimestamp(),
-      updatedAt: serverTimestamp(), updatedByUid: profile.uid, updatedByType: "self"
+      updatedAt: serverTimestamp(), updatedByUid: profile.uid,
+      updatedByName: profile.name, updatedByType: "self"
     };
     if (field === "departureAcknowledgedAt") values.departureTime = departureTime;
     transaction.set(ref, values, { merge: true });
@@ -180,6 +186,10 @@ function renderOfficeRows() {
     values.forEach(value => { const td = document.createElement("td"); td.textContent = value; tr.appendChild(td); });
     const action = document.createElement("td");
     action.append(...staffActionButtons(item));
+    const audit = document.createElement("div");
+    audit.className = "audit-meta";
+    renderProgressAudit(audit, item.progress);
+    action.appendChild(audit);
     tr.appendChild(action);
     el.dailyProgressTableBody.appendChild(tr);
     const card = document.createElement("article");
@@ -216,7 +226,8 @@ function staffActionButtons(item) {
         shiftGroupId: item.shift.id, workerId: item.user.id, branchId: item.shift.branchId,
         date: item.shift.date, shiftType: item.shift.shiftType,
         [field]: serverTimestamp(), createdAt: item.progress.createdAt || serverTimestamp(),
-        updatedAt: serverTimestamp(), updatedByUid: currentProfile.uid, updatedByType: "staff"
+        updatedAt: serverTimestamp(), updatedByUid: currentProfile.uid,
+        updatedByName: currentProfile.name, updatedByType: "staff"
       };
       if (field === "departureAcknowledgedAt") values.departureTime = departureTime;
       await setDoc(progressRef(item.shift.id, item.user.id), values, { merge: true });
@@ -236,6 +247,18 @@ function progressStatus(progress, field, doneLabel) {
     ? progress.departureTime || formatTime(progress[field])
     : formatTime(progress[field]);
   return `${doneLabel} ${time}`;
+}
+function renderProgressAudit(target, progress) {
+  const date = progress?.updatedAt?.toDate?.();
+  if (!date || !progress?.updatedByName) {
+    target.hidden = true;
+    target.textContent = "";
+    return;
+  }
+  target.textContent = `状態変更：${progress.updatedByName}　${date.toLocaleString("ja-JP", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+  })}`;
+  target.hidden = false;
 }
 function formatTime(value) { const d = value?.toDate?.(); return d ? d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : ""; }
 function requestDepartureTime(existingTime = "") {

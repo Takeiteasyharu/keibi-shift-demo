@@ -24,7 +24,7 @@ export function initProxyInput(elements, showScreen, openProxyCalendar) {
 export async function showProxyWorkerList(profile = currentProfile, role = currentRole) {
   if (profile) currentProfile = profile;
   if (role) currentRole = role;
-  if (!["staff", "admin"].includes(currentRole?.role)) throw new Error("代理入力を開く権限がありません。");
+  if (!["staff", "admin"].includes(currentRole?.role)) throw new Error("勤務希望を編集する権限がありません。");
   navigate("proxyWorkers");
   el.proxyWorkerMessage.className = "message";
   try {
@@ -42,7 +42,7 @@ export async function showProxyWorkerList(profile = currentProfile, role = curre
     render();
   } catch (error) {
     console.error(error);
-    el.proxyWorkerMessage.textContent = "代理入力対象者を読み込めませんでした。";
+    el.proxyWorkerMessage.textContent = "勤務希望の編集対象者を読み込めませんでした。";
     el.proxyWorkerMessage.className = "message show error";
   }
 }
@@ -81,11 +81,11 @@ function render() {
   });
   if (!visible.length) {
     const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="4">該当する代理入力対象者はいません</td>';
+    row.innerHTML = '<td colspan="4">該当する編集対象者はいません</td>';
     el.proxyWorkerTableBody.appendChild(row);
     const empty = document.createElement("div");
     empty.className = "panel";
-    empty.textContent = "該当する代理入力対象者はいません";
+    empty.textContent = "該当する編集対象者はいません";
     el.proxyWorkerCards.appendChild(empty);
   }
 }
@@ -93,7 +93,7 @@ function render() {
 function proxyButton(worker) {
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = "代理入力";
+  button.textContent = "勤務希望を編集";
   button.addEventListener("click", () => openCalendar(worker, "proxyWorkers"));
   return button;
 }

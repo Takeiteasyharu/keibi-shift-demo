@@ -1,0 +1,5 @@
+{
+  "score": 5,
+  "summary": "Office users may update the already-validated optional furigana field only within the existing same-branch/admin profile-edit permission. Role, UID, branch, account status, creation metadata, and ownership restrictions remain unchanged.",
+  "findings": []
+}

@@ -265,7 +265,6 @@
     .status-night { background: var(--purple-bg); }
     .status-both { background: linear-gradient(180deg, var(--green-bg) 0 50%, var(--purple-bg) 50%); }
     .status-unavailable { background: var(--red-bg); }
-    .status-undecided { background: var(--blue-bg); }
     .status-locked { background: var(--gray-bg); }
 
     .legend {
@@ -282,7 +281,7 @@
       align-items: center;
       justify-content: center;
       background: rgba(17, 24, 39, .72);
-      z-index: 20;
+      z-index: 1500;
       padding: 16px;
     }
 
@@ -339,11 +338,11 @@
     .choice.day { background: var(--green-bg); }
     .choice.night { background: var(--purple-bg); }
     .choice.unavailable { background: var(--red-bg); }
-    .choice.undecided { background: var(--blue-bg); }
+    .choice.both { background: linear-gradient(135deg, var(--green-bg) 0 50%, var(--purple-bg) 50% 100%); }
     .choice.day[aria-pressed="true"] { background: #166534; }
     .choice.night[aria-pressed="true"] { background: #5b21b6; }
     .choice.unavailable[aria-pressed="true"] { background: #b91c1c; }
-    .choice.undecided[aria-pressed="true"] { background: #1d4ed8; }
+    .choice.both[aria-pressed="true"] { background: linear-gradient(135deg, #166534 0 50%, #5b21b6 50% 100%); }
 
     .lock-note {
       padding: 12px;
@@ -400,6 +399,117 @@
     }
 
     .admin-cards { display: none; }
+    .monthly-schedule-scroll {
+      width:100%;
+      max-height:calc(100vh - 230px);
+      overflow:auto;
+      border:2px solid #64748b;
+      background:#fff;
+      overscroll-behavior:contain;
+    }
+    #adminScreen .monthly-schedule-table {
+      width:max-content;
+      min-width:100%;
+      table-layout:fixed;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size:15px;
+    }
+    .monthly-schedule-table th,
+    .monthly-schedule-table td {
+      min-width:48px;
+      height:34px;
+      padding:3px 4px;
+      border:0;
+      border-right:1px solid #94a3b8;
+      border-bottom:1px solid #94a3b8;
+      text-align:center;
+      vertical-align:middle;
+    }
+    .monthly-schedule-table thead th {
+      position:sticky;
+      top:0;
+      z-index:20;
+      height:52px;
+      background:#e2e8f0;
+      line-height:1.25;
+      white-space:nowrap;
+    }
+    .monthly-schedule-table .schedule-name-head,
+    .monthly-schedule-table .schedule-name-cell {
+      position:sticky;
+      left:0;
+      z-index:15;
+      width:190px;
+      min-width:190px;
+      max-width:190px;
+      background:#fff;
+      text-align:left;
+      box-shadow:3px 0 0 #64748b;
+    }
+    .monthly-schedule-table .schedule-name-head { z-index:30; background:#dbeafe; text-align:center; }
+    .monthly-schedule-table .schedule-name-cell.menu-open { z-index:120; }
+    .monthly-schedule-table .schedule-shift-head,
+    .monthly-schedule-table .schedule-shift-label { min-width:52px; width:52px; background:#f8fafc; font-weight:900; }
+    .schedule-person { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px; align-items:center; }
+    .schedule-person .worker-action-menu-wrap { width:auto; }
+    .schedule-person-number { display:block; color:#475569; font-size:12px; font-weight:800; }
+    .schedule-person-name { display:block; overflow:hidden; font-size:15px; font-weight:900; text-overflow:ellipsis; white-space:nowrap; }
+    .schedule-person .worker-action-menu-button { width:34px !important; min-width:34px; min-height:34px; font-size:22px; }
+    .schedule-mark { font-size:23px; font-weight:900; line-height:1; }
+    .schedule-mark.is-available { color:#15803d; background:#f0fdf4; }
+    .schedule-mark.is-unavailable { color:#b91c1c; background:#fff1f2; }
+    .monthly-schedule-table tr.is-proxy-target-day > * { border-top:3px solid #f59e0b; }
+    .monthly-schedule-table tr.is-proxy-target-night > * { border-bottom:3px solid #f59e0b; }
+    .monthly-schedule-table tr.is-proxy-target > *:last-child { border-right:3px solid #f59e0b; }
+    .monthly-schedule-table .schedule-name-cell.is-proxy-target-name {
+      border-top:3px solid #f59e0b;
+      border-bottom:3px solid #f59e0b;
+      border-left:3px solid #f59e0b;
+      background:#fef3c7;
+      box-shadow:3px 0 0 #64748b;
+    }
+    .proxy-active-label { display:inline-block; margin-top:5px; padding:3px 7px; border-radius:999px; background:#b45309; color:#fff; font-size:12px; font-weight:900; }
+    .schedule-mark.is-proxy-editable { cursor:pointer; }
+    .schedule-mark.is-proxy-editable:hover { background-color:#fffbeb; }
+    .schedule-mark.is-saving { cursor:pointer; opacity:.7; }
+    .proxy-complete-button {
+      width:36px !important;
+      min-width:36px;
+      min-height:36px;
+      padding:0;
+      border-radius:10px;
+      background:#166534;
+      color:#fff;
+      font-size:23px;
+      line-height:1;
+    }
+    .proxy-complete-button:disabled { cursor:default; opacity:.6; }
+    .schedule-day-header.is-sunday { color:#b91c1c; background:#fee2e2; }
+    .schedule-day-header.is-saturday { color:#1d4ed8; background:#dbeafe; }
+    .monthly-schedule-table .schedule-day-header[role="button"] { cursor:pointer; }
+    .monthly-schedule-table .schedule-day-header[role="button"]:focus-visible { outline:4px solid #111827; outline-offset:-4px; }
+    .monthly-schedule-table .schedule-day-header.is-selected-date {
+      color:#0f172a;
+      background:#bfdbfe;
+      box-shadow:inset 3px 0 0 #1d4ed8, inset -3px 0 0 #1d4ed8, inset 0 4px 0 #1d4ed8;
+    }
+    .monthly-schedule-table .schedule-day-header.is-selected-date::after {
+      content:"選択中";
+      display:block;
+      margin-top:2px;
+      color:#1d4ed8;
+      font-size:10px;
+      font-weight:900;
+    }
+    .monthly-schedule-table .schedule-mark.is-selected-date {
+      box-shadow:inset 3px 0 0 #2563eb, inset -3px 0 0 #2563eb;
+      background-image:linear-gradient(rgba(219,234,254,.45),rgba(219,234,254,.45));
+    }
+    #adminScreen .admin-cards { display:none !important; }
+    #menuShiftBuilderButton,
+    #menuOwnShiftsButton,
+    #menuDailyProgressButton { display:none !important; }
     .role-badge {
       display: inline-flex;
       align-items: center;
@@ -415,11 +525,6 @@
       white-space: nowrap;
     }
     .desktop-table { overflow-x: auto; }
-    #adminScreen .desktop-table table { min-width: 980px; table-layout: fixed; }
-    #adminScreen .desktop-table th:nth-child(1) { width: 24%; }
-    #adminScreen .desktop-table th:nth-child(2) { width: 14%; }
-    #adminScreen .desktop-table th:nth-child(3) { width: 52%; }
-    #adminScreen .desktop-table th:nth-child(4) { width: 10%; }
     .admin-summary-row td { vertical-align: middle; line-height: 1.45; }
     .admin-summary-line { margin: 3px 0; overflow-wrap: anywhere; }
     .admin-summary-number, .admin-summary-status, .admin-summary-name { font-weight: 900; }
@@ -611,6 +716,7 @@ body.side-menu-open { overflow:hidden; }
 .shift-status-badge.is-draft { color:#1e3a8a; background:#eff6ff; border-color:#2563eb; }
 .shift-status-badge.is-confirmed { color:#78350f; background:#fef3c7; border-color:#b45309; }
 .shift-card-audit { color:#374151; font-size:16px; }
+.audit-meta { color:#6b7280; font-size:14px; line-height:1.55; white-space:pre-line; }
 .shift-group-card.status-draft-card { box-shadow:inset 0 7px 0 #2563eb; }
 .shift-group-card.status-confirmed-card { box-shadow:inset 0 7px 0 #b45309; background:#fffdf5; }
 .shift-card-menu-wrap { position:relative; }
@@ -747,6 +853,7 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
   background:#fff;
   box-shadow:0 14px 34px rgba(15,23,42,.28);
 }
+.worker-action-menu.table-floating-menu { position:fixed; z-index:1300; }
 .worker-action-menu[hidden] { display:none; }
 .worker-action-menu button { width:100%; min-height:54px; padding:10px 14px; font-size:18px; text-align:left; }
 .worker-action-menu .worker-menu-disable { color:#991b1b; background:#fff; border-color:#b91c1c; }
@@ -797,6 +904,9 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
 .proxy-input-banner button { width:min(360px,100%); }
 .proxy-input-banner[hidden] { display:none; }
 .own-shifts-list { display:grid; gap:18px; }
+.own-shifts-section { display:grid; gap:14px; margin-top:24px; }
+.own-shifts-section-title { margin:0; padding-bottom:8px; border-bottom:3px solid var(--brand); color:var(--brand); font-size:28px; }
+.load-more-shifts { width:min(320px,100%); margin:4px auto 0; }
 .own-shift-card {
   display:grid;
   gap:13px;
@@ -807,6 +917,7 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
   box-shadow:0 5px 16px rgba(15,23,42,.12);
 }
 .own-shift-card.shift-night { border-color:#5b21b6; background:#faf5ff; }
+.own-shift-card.is-past { border-color:#64748b; background:#f8fafc; }
 .next-shift-label {
   width:max-content;
   padding:5px 12px;
@@ -919,6 +1030,10 @@ input[readonly] { background:#e5e7eb; color:#374151; cursor:not-allowed; }
   .selected-members { grid-template-columns:1fr; }
   .member-section-heading { align-items:flex-start; flex-direction:column; gap:8px; }
   .leader-choices { display:grid; grid-template-columns:1fr; }
+  #adminScreen .desktop-table { display:block; }
+  #adminScreen .monthly-schedule-scroll { max-height:calc(100vh - 180px); }
+  .monthly-schedule-table .schedule-name-head,
+  .monthly-schedule-table .schedule-name-cell { width:150px; min-width:150px; max-width:150px; }
   .shift-editor-header { display:block; }
   .shift-editor-top-actions { display:grid; grid-template-columns:1fr; margin-bottom:14px; }
 }
