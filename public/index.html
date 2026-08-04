@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>警備員勤務希望管理システム | テイシン警備</title>
-  <link rel="stylesheet" href="./css/style.css?v=20260803-15">
+  <link rel="stylesheet" href="./css/style.css?v=20260804-7">
 </head>
 <body>
   <main class="app">
@@ -170,7 +170,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel admin-control-panel">
         <div class="integrated-management-actions">
           <button id="newManagedGuardButton" class="wide-action" type="button">＋ 新しい警備員を登録</button>
           <button id="openDeletedAccountsButton" class="secondary" type="button">削除済みアカウント</button>
@@ -199,6 +199,19 @@
           <button type="button" data-filter="night">夜勤</button>
           <button type="button" data-filter="none">未入力</button>
         </div>
+        <nav id="adminKanaPages" class="kana-page-buttons" aria-label="警備員の五十音ページ">
+          <button type="button" data-kana-page="all" class="active">全員</button>
+          <button type="button" data-kana-page="a">あ行</button>
+          <button type="button" data-kana-page="ka">か行</button>
+          <button type="button" data-kana-page="sa">さ行</button>
+          <button type="button" data-kana-page="ta">た行</button>
+          <button type="button" data-kana-page="na">な行</button>
+          <button type="button" data-kana-page="ha">は行</button>
+          <button type="button" data-kana-page="ma">ま行</button>
+          <button type="button" data-kana-page="ya">や行</button>
+          <button type="button" data-kana-page="ra">ら行</button>
+          <button type="button" data-kana-page="wa">わ行</button>
+        </nav>
       </div>
 
       <div class="desktop-table monthly-schedule-scroll">
@@ -208,6 +221,7 @@
         </table>
       </div>
       <div id="adminCards" class="admin-cards"></div>
+      <div class="admin-table-bottom-space" aria-hidden="true"></div>
     </section>
 
     <section id="pendingApprovalScreen" class="screen" aria-labelledby="pendingApprovalTitle">
@@ -248,7 +262,7 @@
     </section>
 
     <section id="dailyProgressScreen" class="screen" aria-labelledby="dailyProgressTitle">
-      <div class="header"><div><h1 id="dailyProgressTitle">当日の勤務状況</h1><div class="user-line">出発確認・出発・到着の状況</div></div>
+      <div class="header"><div><h1 id="dailyProgressTitle">当日の勤務</h1><div class="user-line">出発時間確認・出発・上番・下番の状況</div></div>
         <button id="dailyProgressMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
       </div>
       <div class="panel progress-toolbar">
@@ -257,14 +271,22 @@
         <div id="progressFilters" class="filter-buttons">
           <button type="button" class="active" data-progress-filter="all">全員</button>
           <button type="button" data-progress-filter="not-departed">未出発</button>
-          <button type="button" data-progress-filter="not-arrived">未到着</button>
-          <button type="button" data-progress-filter="arrived">到着済</button>
+          <button type="button" data-progress-filter="not-started">未上番</button>
+          <button type="button" data-progress-filter="finished">下番済</button>
         </div>
       </div>
       <div id="dailyProgressMessage" class="message" role="status"></div>
-      <div class="desktop-table"><table><thead><tr><th>警備員</th><th>現場名</th><th>役割</th><th>出発確認</th><th>出発</th><th>到着</th><th>代理更新</th></tr></thead>
+      <div class="desktop-table"><table><thead><tr><th>氏名</th><th>勤務帯</th><th>出発時間確認</th><th>出発</th><th>上番</th><th>下番</th><th>代理更新</th></tr></thead>
         <tbody id="dailyProgressTableBody"></tbody></table></div>
       <div id="dailyProgressCards" class="daily-progress-cards"></div>
+    </section>
+
+    <section id="departureContactScreen" class="screen" aria-labelledby="departureContactTitle">
+      <div class="header"><div><h1 id="departureContactTitle">打刻連絡</h1><div class="user-line">本日の勤務について順番に連絡してください</div></div>
+        <button id="departureContactMenuButton" class="menu-button" type="button" aria-label="メニューを開く">≡</button>
+      </div>
+      <div id="departureContactMessage" class="message" role="status"></div>
+      <div id="departureContactList" class="departure-contact-list"></div>
     </section>
 
     <section id="proxyWorkerScreen" class="screen" aria-labelledby="proxyWorkerTitle">
@@ -410,8 +432,8 @@
       <button id="menuAdminButton" type="button">管理画面</button>
       <button id="menuShiftBuilderButton" type="button">シフト作成</button>
       <button id="menuCalendarButton" type="button">自分の勤務希望</button>
-      <button id="menuOwnShiftsButton" type="button">自分のシフト</button>
-      <button id="menuDailyProgressButton" type="button">当日の勤務状況</button>
+      <button id="menuDepartureContactButton" type="button">打刻連絡</button>
+      <button id="menuDailyProgressButton" type="button">当日の勤務</button>
       <div id="applicationsMenuGroup" class="side-menu-group">
         <strong>各種申請</strong>
         <button id="menuRequestsButton" type="button">内勤者申請</button>
@@ -660,13 +682,41 @@
   <div id="departureTimeModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="departureTimeTitle">
     <div class="modal compact-action-modal">
       <h2 id="departureTimeTitle">出発時間を入力してください</h2>
-      <label for="departureTimeInput">出発時間
-        <input id="departureTimeInput" type="time" required>
-      </label>
+      <fieldset class="departure-time-selects">
+        <legend id="timeInputLegend">出発時間</legend>
+        <label for="departureHourInput">時
+          <select id="departureHourInput">
+            <option value="00">00</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option>
+            <option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option>
+            <option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option>
+            <option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option>
+            <option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option>
+          </select>
+        </label>
+        <span aria-hidden="true">：</span>
+        <label for="departureMinuteInput">分
+          <select id="departureMinuteInput">
+            <option value="00">00</option><option value="05">05</option><option value="10">10</option><option value="15">15</option>
+            <option value="20">20</option><option value="25">25</option><option value="30">30</option><option value="35">35</option>
+            <option value="40">40</option><option value="45">45</option><option value="50">50</option><option value="55">55</option>
+          </select>
+        </label>
+      </fieldset>
       <div id="departureTimeMessage" class="message" role="alert"></div>
       <div class="actions">
+        <button id="confirmDepartureTimeButton" type="button" disabled>確認</button>
         <button id="cancelDepartureTimeButton" class="secondary" type="button">キャンセル</button>
-        <button id="confirmDepartureTimeButton" type="button">出発確認</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="progressActionConfirmModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="progressActionConfirmTitle">
+    <div class="modal compact-action-modal progress-action-confirm-modal">
+      <h2 id="progressActionConfirmTitle">打刻の確認</h2>
+      <p id="progressActionConfirmMessage" class="operation-confirm-message"></p>
+      <div class="actions progress-confirm-actions">
+        <button id="confirmProgressActionButton" type="button">記録する</button>
+        <button id="cancelProgressActionButton" class="secondary" type="button">キャンセル</button>
       </div>
     </div>
   </div>
@@ -705,6 +755,6 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js?v=20260803-22"></script>
+  <script type="module" src="./js/app.js?v=20260804-7"></script>
 </body>
 </html>

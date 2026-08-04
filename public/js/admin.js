@@ -7,6 +7,7 @@ let navigate;
 let currentProfile;
 let currentRole;
 let activeFilter = "all";
+let activeKanaPage = "all";
 let createWorkerMenu;
 let notify;
 let proxyTargetUid = "";
@@ -44,6 +45,13 @@ export function initAdmin(elements, showScreen, workerMenuFactory, showToast) {
     updateFilterButtons();
     renderAdmin();
   });
+  el.adminKanaPages.addEventListener("click", event => {
+    const button = event.target.closest("button[data-kana-page]");
+    if (!button) return;
+    activeKanaPage = button.dataset.kanaPage;
+    updateKanaPageButtons();
+    renderAdmin();
+  });
 }
 
 export function stopAdminObserver() {
@@ -56,8 +64,10 @@ export function stopAdminObserver() {
   proxyTargetUid = "";
   selectedDate = "";
   activeFilter = "all";
+  activeKanaPage = "all";
   pendingProxyCells.clear();
   if (el?.adminFilters) updateFilterButtons();
+  if (el?.adminKanaPages) updateKanaPageButtons();
 }
 
 export async function showAdmin(profile = currentProfile, roleData = currentRole) {
@@ -66,6 +76,7 @@ export async function showAdmin(profile = currentProfile, roleData = currentRole
   if (!["staff", "admin"].includes(currentRole?.role)) throw new Error("管理画面を開く権限がありません。");
   navigate("admin");
   updateFilterButtons();
+  updateKanaPageButtons();
   await renderAdmin();
 }
 
@@ -163,6 +174,7 @@ async function renderAdmin() {
     .filter(user => isVisibleAccount(user) &&
       (allBranches || user.role === "admin" || user.branchId === branchId))
     .filter(user => user.uid === proxyTargetUid || matchesSelectedDateFilter(user.monthlyAvailability))
+    .filter(user => user.uid === proxyTargetUid || matchesKanaPage(user))
     .filter(user => !search || `${user.employeeNumber} ${user.name} ${user.city}`.toLowerCase().includes(search))
     .sort((a, b) => compareWorkerNames(a, b));
   renderScheduleHeader(year, month, daysInMonth);
@@ -231,6 +243,23 @@ async function renderAdmin() {
     el.adminTableBody.appendChild(emptyRow);
   }
   applySelectedDateHighlight();
+  updateAdminEditModeControls();
+}
+
+function updateAdminEditModeControls() {
+  const editing = Boolean(proxyTargetUid);
+  el.adminScreen.querySelectorAll("button").forEach(button => {
+    if (button.classList.contains("proxy-complete-button")) return;
+    if (editing) {
+      if (!("editModeWasDisabled" in button.dataset)) button.dataset.editModeWasDisabled = String(button.disabled);
+      button.disabled = true;
+      return;
+    }
+    if ("editModeWasDisabled" in button.dataset) {
+      button.disabled = button.dataset.editModeWasDisabled === "true";
+      delete button.dataset.editModeWasDisabled;
+    }
+  });
 }
 
 function ensureAvailabilityObserver(availabilityQuery, key, fallbackQuery = null) {
@@ -306,9 +335,10 @@ function scheduleMarkCell(wish, shiftType, user, date) {
   const cell = document.createElement("td");
   cell.className = "schedule-mark";
   cell.dataset.date = date;
-  applyScheduleMark(cell, wish, shiftType);
-  if (proxyTargetUid === user.uid && canStartTableProxy(user)) {
-    cell.classList.add("is-proxy-editable");
+  const isPast = date < toLocalDateKey(new Date());
+  applyScheduleMark(cell, wish, shiftType, date);
+  if (!isPast && proxyTargetUid === user.uid && canStartTableProxy(user)) {
+    cell.classList.add("is-proxy-editable", "is-proxy-editable-range", `is-${shiftType}`);
     cell.tabIndex = 0;
     cell.setAttribute("role", "button");
     cell.setAttribute("aria-label", `${user.name} ${date} ${shiftType === "day" ? "日勤" : "夜勤"}を変更`);
@@ -349,9 +379,9 @@ function applySelectedDateHighlight() {
   });
 }
 
-function applyScheduleMark(cell, wish, shiftType) {
+function applyScheduleMark(cell, wish, shiftType, date) {
   cell.textContent = "";
-  cell.classList.remove("is-available", "is-unavailable");
+  cell.classList.remove("is-available", "is-unavailable", "is-past-blank");
   const state = scheduleCellState(wish, shiftType);
   cell.dataset.state = state;
   if (state === "available") {
@@ -363,7 +393,13 @@ function applyScheduleMark(cell, wish, shiftType) {
     cell.classList.add("is-unavailable");
     cell.title = shiftType === "day" ? "日勤不可" : "夜勤不可";
   } else {
-    cell.title = shiftType === "day" ? "日勤未入力" : "夜勤未入力";
+    if (date < toLocalDateKey(new Date())) {
+      cell.textContent = "×";
+      cell.classList.add("is-past-blank");
+      cell.title = shiftType === "day" ? "日勤未入力（過去）" : "夜勤未入力（過去）";
+    } else {
+      cell.title = shiftType === "day" ? "日勤未入力" : "夜勤未入力";
+    }
   }
 }
 
@@ -429,6 +465,14 @@ function updateFilterButtons() {
   });
 }
 
+function updateKanaPageButtons() {
+  el.adminKanaPages.querySelectorAll("button[data-kana-page]").forEach(button => {
+    const active = button.dataset.kanaPage === activeKanaPage;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
 function resetSelectedDateAndFilter() {
   selectedDate = "";
   activeFilter = "all";
@@ -436,6 +480,7 @@ function resetSelectedDateAndFilter() {
 }
 
 async function saveProxyCellChange(cell, wish, shiftType, user, date) {
+  if (date < toLocalDateKey(new Date())) return;
   const key = `${user.uid}_${date}_${shiftType}`;
   if (pendingProxyCells.has(key) || proxyTargetUid !== user.uid) return;
   const previousState = cell.dataset.state || scheduleCellState(wish, shiftType);
@@ -445,10 +490,10 @@ async function saveProxyCellChange(cell, wish, shiftType, user, date) {
   cell.setAttribute("aria-disabled", "true");
   try {
     const saved = await writeProxyAvailabilityCell(user, date, shiftType, nextState, wish);
-    applyScheduleMark(cell, saved, shiftType);
+    applyScheduleMark(cell, saved, shiftType, date);
   } catch (error) {
     console.error("勤務希望の編集に失敗しました", { error, targetUid: user.uid, date, shiftType });
-    applyScheduleMark(cell, wish, shiftType);
+    applyScheduleMark(cell, wish, shiftType, date);
     notify?.(error?.code === "permission-denied"
       ? "この勤務希望を変更する権限がありません。"
       : error?.code === "failed-precondition"
@@ -463,6 +508,9 @@ async function saveProxyCellChange(cell, wish, shiftType, user, date) {
 }
 
 async function writeProxyAvailabilityCell(user, date, shiftType, nextState, current) {
+  if (date < toLocalDateKey(new Date())) {
+    throw Object.assign(new Error("past availability is read only"), { code: "failed-precondition" });
+  }
   const operatorUid = auth.currentUser?.uid || "";
   if (!operatorUid || !canStartTableProxy(user)) throw Object.assign(new Error("proxy not allowed"), { code: "permission-denied" });
   const reference = doc(db, "availability", `${date}_${user.uid}`);
@@ -525,6 +573,24 @@ function workerReading(user) {
   return String(user.furigana || user.nameKana || user.kana || user.name || "")
     .normalize("NFKC")
     .replace(/[ァ-ヶ]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60));
+}
+
+function matchesKanaPage(user) {
+  if (activeKanaPage === "all") return true;
+  const first = workerReading(user).replace(/^[\s　]+/, "").charAt(0);
+  const groups = {
+    a: "ぁあぃいぅうぇえぉおゔ",
+    ka: "かがきぎくぐけげこご",
+    sa: "さざしじすずせぜそぞ",
+    ta: "ただちぢっつづてでとど",
+    na: "なにぬねの",
+    ha: "はばぱひびぴふぶぷへべぺほぼぽ",
+    ma: "まみむめも",
+    ya: "ゃやゅゆょよ",
+    ra: "らりるれろ",
+    wa: "ゎわをん"
+  };
+  return groups[activeKanaPage]?.includes(first) || false;
 }
 
 function resolveFormalBranchId(user, roleData) {

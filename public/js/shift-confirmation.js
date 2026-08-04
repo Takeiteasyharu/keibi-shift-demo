@@ -9,7 +9,6 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { createMapAddressLink, createMapButton } from "./map-link.js";
 import { branchName } from "./branches.js";
-import { createSelfProgressSection } from "./shift-progress.js?v=20260803-1";
 
 let el;
 let navigate;
@@ -176,7 +175,9 @@ function renderShiftList(container, items, isPast) {
 }
 
 function progressLabel(progress = {}) {
-  if (progress.arrivedAt) return `上番済み ${formatTimestamp(progress.arrivedAt)}`;
+  if (progress.finishedAt) return `下番済み ${formatTimestamp(progress.finishedAt)}`;
+  if (progress.startedAt) return `上番済み ${formatTimestamp(progress.startedAt)}`;
+  if (progress.arrivedAt) return `到着済み ${formatTimestamp(progress.arrivedAt)}`;
   if (progress.departedAt) return `出発済み ${formatTimestamp(progress.departedAt)}`;
   if (progress.departureAcknowledgedAt) return `出発確認済み ${formatTimestamp(progress.departureAcknowledgedAt)}`;
   return "未上番";
@@ -208,7 +209,6 @@ async function openDetail(shift) {
     membersButton.addEventListener("click", () => openMembers(shift));
     el.ownShiftDetailBody.appendChild(membersButton);
   }
-  el.ownShiftDetailBody.appendChild(await createSelfProgressSection(shift, currentProfile));
   el.ownShiftDetailModal.classList.add("show");
   requestAnimationFrame(() => el.closeOwnShiftDetailButton.focus());
 }
@@ -243,7 +243,7 @@ async function openMembers(shift) {
       role.textContent = member.workerId === shift.leaderUid ? "隊長" : "隊員";
       const details = document.createElement("div");
       details.textContent = `警備員番号：${member.employeeNumber || "未設定"}\n最寄り駅：${member.nearestStation || "未設定"}\n` +
-        `進捗：${progress.arrivedAt ? "到着済" : progress.departedAt ? "出発済" : "未出発"}`;
+        `進捗：${progress.finishedAt ? "下番済" : progress.startedAt ? "上番済" : progress.arrivedAt ? "到着済" : progress.departedAt ? "出発済" : "未出発"}`;
       card.append(name, role, details);
       el.shiftMembersList.appendChild(card);
     });

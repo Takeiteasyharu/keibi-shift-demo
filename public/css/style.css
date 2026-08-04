@@ -355,10 +355,19 @@
 
     .admin-tools {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
+      grid-template-columns:minmax(185px,220px) minmax(220px,1fr) auto auto;
+      gap:10px;
       align-items: end;
     }
+
+    #adminScreen .admin-control-panel { padding:14px 16px; }
+    #adminScreen .admin-tools input { min-height:44px; }
+    #adminScreen .admin-tools button,
+    #adminScreen .filter-buttons button,
+    #adminScreen .integrated-management-actions button { min-height:44px; padding:8px 14px; font-size:16px; }
+    #adminScreen .integrated-management-actions { display:flex; gap:10px; margin-bottom:10px; }
+    #adminScreen .integrated-management-actions .wide-action { flex:0 1 auto; width:auto; }
+    #adminScreen .integrated-management-actions .small-text { flex:1 1 320px; align-self:center; }
 
     .filter-buttons {
       display: flex;
@@ -402,17 +411,36 @@
     .monthly-schedule-scroll {
       width:100%;
       max-height:calc(100vh - 230px);
-      overflow:auto;
+      overflow:auto !important;
       border:2px solid #64748b;
+      border-radius:8px;
+      box-sizing:border-box;
       background:#fff;
       overscroll-behavior:contain;
+      scrollbar-gutter:stable;
     }
+
+    #adminScreen .filter-buttons { margin:10px 0 8px; }
+    .kana-page-buttons { display:flex; gap:4px; overflow-x:auto; padding:4px 0 2px; scrollbar-width:thin; }
+    .kana-page-buttons button {
+      flex:1 0 62px;
+      min-height:40px;
+      padding:6px 9px;
+      border-color:transparent;
+      background:#fff;
+      color:#334155;
+      font-size:15px;
+      white-space:nowrap;
+    }
+    .kana-page-buttons button:hover { border-color:#166534; }
+    .kana-page-buttons button.active { color:#166534; border-color:#166534; border-bottom-width:3px; background:#f0fdf4; }
     #adminScreen .monthly-schedule-table {
       width:max-content;
       min-width:100%;
       table-layout:fixed;
       border-collapse:separate;
       border-spacing:0;
+      margin:0;
       font-size:15px;
     }
     .monthly-schedule-table th,
@@ -438,19 +466,23 @@
     .monthly-schedule-table .schedule-name-head,
     .monthly-schedule-table .schedule-name-cell {
       position:sticky;
-      left:0;
+      left:0 !important;
       z-index:15;
       width:190px;
       min-width:190px;
       max-width:190px;
       background:#fff;
       text-align:left;
-      box-shadow:3px 0 0 #64748b;
+      border-right:2px solid #111827;
+      box-shadow:2px 0 0 rgba(255,255,255,.95);
     }
     .monthly-schedule-table .schedule-name-head { z-index:30; background:#dbeafe; text-align:center; }
     .monthly-schedule-table .schedule-name-cell.menu-open { z-index:120; }
     .monthly-schedule-table .schedule-shift-head,
     .monthly-schedule-table .schedule-shift-label { min-width:52px; width:52px; background:#f8fafc; font-weight:900; }
+    .monthly-schedule-table tbody tr:nth-child(even) > .schedule-shift-label,
+    .monthly-schedule-table tbody tr:nth-child(even) > .schedule-mark,
+    .monthly-schedule-table .schedule-name-cell { border-bottom:2px solid #111827; }
     .schedule-person { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px; align-items:center; }
     .schedule-person .worker-action-menu-wrap { width:auto; }
     .schedule-person-number { display:block; color:#475569; font-size:12px; font-weight:800; }
@@ -459,9 +491,10 @@
     .schedule-mark { font-size:23px; font-weight:900; line-height:1; }
     .schedule-mark.is-available { color:#15803d; background:#f0fdf4; }
     .schedule-mark.is-unavailable { color:#b91c1c; background:#fff1f2; }
-    .monthly-schedule-table tr.is-proxy-target-day > * { border-top:3px solid #f59e0b; }
-    .monthly-schedule-table tr.is-proxy-target-night > * { border-bottom:3px solid #f59e0b; }
-    .monthly-schedule-table tr.is-proxy-target > *:last-child { border-right:3px solid #f59e0b; }
+    .schedule-mark.is-past-blank { color:#475569; background:#e5e7eb; }
+    .monthly-schedule-table .is-proxy-editable-range.is-day { border-top:3px solid #f59e0b; }
+    .monthly-schedule-table .is-proxy-editable-range.is-night { border-bottom:3px solid #f59e0b; }
+    .monthly-schedule-table tr.is-proxy-target > .is-proxy-editable-range:last-child { border-right:3px solid #f59e0b; }
     .monthly-schedule-table .schedule-name-cell.is-proxy-target-name {
       border-top:3px solid #f59e0b;
       border-bottom:3px solid #f59e0b;
@@ -507,9 +540,9 @@
       background-image:linear-gradient(rgba(219,234,254,.45),rgba(219,234,254,.45));
     }
     #adminScreen .admin-cards { display:none !important; }
-    #menuShiftBuilderButton,
-    #menuOwnShiftsButton,
-    #menuDailyProgressButton { display:none !important; }
+    .admin-table-bottom-space { min-height:clamp(420px,58vh,640px); background:#fff; }
+    body:has(#adminScreen.active) .app { width:min(1500px,100%); }
+    #menuShiftBuilderButton { display:none !important; }
     .role-badge {
       display: inline-flex;
       align-items: center;
@@ -894,11 +927,22 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
   color:#881337;
   font-size:20px;
 }
-#departureTimeInput {
-  min-height:64px;
-  font-size:28px;
-  font-weight:900;
+.departure-time-selects {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:end;
+  gap:10px;
+  margin:0;
+  padding:0;
+  border:0;
 }
+.departure-time-selects legend { margin-bottom:10px; font-weight:900; }
+.departure-time-selects label { margin:0; }
+.departure-time-selects select { min-height:64px; font-size:28px; font-weight:900; text-align:center; }
+.departure-time-selects > span { padding-bottom:13px; font-size:28px; font-weight:900; }
+.progress-action-confirm-modal { padding:28px; border-radius:14px; }
+.progress-action-confirm-modal .operation-confirm-message { margin:8px 0 24px; font-size:23px; line-height:1.65; }
+.progress-confirm-actions button { min-width:180px; min-height:60px; font-size:20px; }
 .proxy-input-banner strong { font-size:28px; }
 .proxy-input-banner span { font-size:21px; font-weight:800; }
 .proxy-input-banner button { width:min(360px,100%); }
@@ -976,12 +1020,19 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
 .departure-check-time { font-size:21px; font-weight:900; }
 .self-progress-row { display:grid; grid-template-columns:150px minmax(120px,1fr) minmax(190px,auto); align-items:center; gap:10px; padding:12px 0; border-top:1px solid var(--line); font-size:19px; }
 .self-progress-row button { min-height:58px; font-size:19px; }
+.self-progress-row.is-complete { border-radius:8px; background:#ecfdf5; }
+.self-progress-row.is-complete strong,
+.self-progress-row.is-complete span { color:#166534; font-weight:900; }
+.departure-contact-list { display:grid; gap:18px; }
 .progress-toolbar { display:flex; align-items:end; flex-wrap:wrap; gap:14px; }
 .progress-toolbar label { min-width:190px; }
 .daily-progress-cards { display:none; }
 .daily-progress-card { white-space:pre-line; padding:16px; border:2px solid var(--line); border-radius:12px; background:#fff; font-size:18px; line-height:1.6; }
 .daily-progress-actions { display:grid; gap:8px; margin-top:12px; }
 .daily-progress-actions button { width:100%; }
+.progress-state { font-weight:900; white-space:nowrap; }
+.progress-state.is-done { color:#166534; background:#ecfdf5; }
+.progress-state.is-pending { color:#991b1b; background:#fff1f2; }
 .guard-editor { width:min(850px,100%); }
 .managed-fixed-values {
   display:flex;
@@ -998,6 +1049,11 @@ button.danger { background:#b91c1c; border-color:#b91c1c; }
 input[readonly] { background:#e5e7eb; color:#374151; cursor:not-allowed; }
 @media (max-width:1000px) and (min-width:761px) { .shift-groups { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:760px) {
+  #adminScreen .integrated-management-actions { flex-wrap:wrap; }
+  #adminScreen .integrated-management-actions button { flex:1 1 220px; }
+  #adminScreen .integrated-management-actions .small-text { flex-basis:100%; }
+  #adminScreen .admin-tools { grid-template-columns:1fr; }
+  .admin-table-bottom-space { min-height:50vh; }
   .mobile-only-list { display:grid; }
   #accountApprovalsScreen .desktop-table { display:none; }
   .integrated-management-actions { grid-template-columns:1fr; }

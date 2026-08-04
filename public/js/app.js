@@ -1,12 +1,12 @@
 import { loadOwnProfile, loginWithEmployeeNumber, logout, observeAuthState, observeOwnRole, registerGuard, removeLegacyAdminBranch } from "./auth.js?v=20260803-1";
 import { clearAvailabilityCache, loadOwnAvailability } from "./availability.js?v=20260803-8";
 import { initCalendar, resetCalendarState, setConfirmedShifts, showCalendar } from "./calendar.js?v=20260803-13";
-import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin, stopAdminObserver } from "./admin.js?v=20260803-8";
+import { initAdmin, loadStaffRequests, removeInactiveAccountFromAdmin, reviewStaffRequest, showAdmin, stopAdminObserver } from "./admin.js?v=20260804-5";
 import { initShifts, loadOwnConfirmedShifts, stopShiftGroupObserver } from "./shifts.js?v=20260803-1";
 import { createIntegratedWorkerMenu, initGuardManagement, setGuardManagementContext, showDeletedAccounts, showGuardManagement } from "./guard-management.js?v=20260803-6";
 import { initProxyInput, showProxyWorkerList } from "./proxy-input.js?v=20260803-1";
-import { initShiftConfirmation, showOwnShifts, stopOwnShiftsObserver } from "./shift-confirmation.js?v=20260803-2";
-import { initShiftProgress, showDailyProgress } from "./shift-progress.js?v=20260803-1";
+import { initShiftConfirmation, stopOwnShiftsObserver } from "./shift-confirmation.js?v=20260804-4";
+import { initShiftProgress, showDailyProgress, showDepartureContact, stopDepartureProgressObservers } from "./shift-progress.js?v=20260804-6";
 import { initAccountApprovals, showAccountApprovals, stopAccountApprovals } from "./account-approvals.js?v=20260801-2";
 import { ALL_BRANCHES, branchName, effectiveBranchId, ensureBranchDocuments, getAdminSelectedBranchId, isOperationalAccount, populateBranchSelect, setAdminSelectedBranchId } from "./branches.js?v=20260801-1";
 
@@ -42,16 +42,16 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function cacheElements() {
-  ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen",
+  ["loginScreen","registerScreen","pendingApprovalScreen","rejectedAccountScreen","calendarScreen","adminScreen","staffRequestsScreen","accountApprovalsScreen","guardManagementScreen","deletedAccountsScreen","proxyWorkerScreen","ownShiftsScreen","dailyProgressScreen","departureContactScreen",
    "loginMessage","registerMessage","loginEmployeeNumber","loginPassword","loginButton",
    "showRegisterButton","forgotPasswordButton","regGuardId","regName","regFurigana","regRequestedBranch","regStaffRequested","regZip","regPref","regCity","regStreet","regBuilding","regNearestStation","regPhone","regEmail","regPassword",
    "regPasswordConfirm","pendingLogoutButton","rejectedLogoutButton","rejectedAccountReason",
    "registerButton","backLoginButton","currentUserName","currentUserId","proxyInputBanner","proxyInputTitle","proxyInputEmployeeNumber","proxyInputName","proxyInputMode","proxyInputWarning","exitProxyInputButton",
    "prevMonthButton","nextMonthButton","todayButton","monthLabel","calendarGrid","openAdminButton",
-   "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters",
+   "adminDateLabel","adminDate","adminSearch","adminSearchButton","adminClearButton","adminFilters","adminKanaPages",
    "adminTableHead","adminTableBody","adminCards","adminPrevDay","adminToday","adminNextDay",
    "menuButton","requestsMenuButton","accountApprovalsMenuButton","guardManagementMenuButton","deletedAccountsMenuButton","proxyWorkerMenuButton","ownShiftsMenuButton","dailyProgressMenuButton","sideMenuBackdrop","sideMenu","closeMenuButton",
-   "menuAdminButton","menuCalendarButton","menuOwnShiftsButton","menuDailyProgressButton","applicationsMenuGroup","menuRequestsButton","menuAccountApprovalsButton","adminBranchSwitchWrap","adminBranchSwitch","menuLogoutButton",
+   "menuAdminButton","menuCalendarButton","menuDepartureContactButton","menuDailyProgressButton","applicationsMenuGroup","menuRequestsButton","menuAccountApprovalsButton","adminBranchSwitchWrap","adminBranchSwitch","menuLogoutButton",
    "guardManagementMessage","newManagedGuardButton","openDeletedAccountsButton","backToGuardManagementButton","guardManagementSearch","guardManagementTableBody","guardManagementCards",
    "deletedAccountsMessage","deletedAccountsTableBody","deletedAccountsCards","accountStatusConfirmModal","accountStatusConfirmTitle","accountStatusConfirmMessage","confirmAccountStatusButton","cancelAccountStatusButton",
    "managedGuardModal","managedGuardModalTitle","managedGuardFormMessage","managedGuardEmployeeNumber","managedGuardName","managedGuardFurigana","managedGuardPhone",
@@ -67,8 +67,9 @@ function cacheElements() {
    "proxyWorkerMessage","proxyWorkerSearch","proxyWorkerTableBody","proxyWorkerCards",
    "ownShiftsMessage","ownShiftsList","pastShiftsList","loadMorePastShiftsButton","ownShiftDetailModal","ownShiftDetailTitle","ownShiftDetailBody","closeOwnShiftDetailButton",
    "shiftMembersModal","shiftMembersTitle","shiftMembersSummary","shiftMembersList","closeShiftMembersButton",
-   "dailyProgressMessage","progressDate","progressShiftType","progressFilters","dailyProgressTableBody","dailyProgressCards",
-   "departureTimeModal","departureTimeInput","departureTimeMessage","cancelDepartureTimeButton","confirmDepartureTimeButton",
+   "dailyProgressMessage","progressDate","progressShiftType","progressFilters","dailyProgressTableBody","dailyProgressCards","departureContactMessage","departureContactList","departureContactMenuButton",
+   "departureTimeModal","departureTimeTitle","timeInputLegend","departureHourInput","departureMinuteInput","departureTimeMessage","cancelDepartureTimeButton","confirmDepartureTimeButton",
+   "progressActionConfirmModal","progressActionConfirmTitle","progressActionConfirmMessage","confirmProgressActionButton","cancelProgressActionButton",
    "shiftPrevDay","shiftNextDay","shiftToday","shiftBuilderDate","shiftTypeDay","shiftTypeNight","shiftBuilderMessage","shiftGroupsList","newShiftGroupButton","otherBranchCandidatesOption","showOtherBranchCandidates",
    "shiftGroupModal","shiftGroupModalTitle","shiftGroupBranchWrap","shiftGroupBranch","shiftGroupTitle","shiftAddress","shiftStartHour","shiftStartMinute","shiftDepartureCheckTime","shiftRequiredMembers","requiredMembersPickerButton","requiredMembersOptions","shiftGroupNote","memberSearch","memberCandidatesToggle","memberCandidates","showOutsideAvailability","selectedMembersList","leaderChoices","clearLeaderButton","groupCompletionMessage","draftShiftTopButton","confirmShiftTopButton","closeShiftGroupTopButton","draftShiftButton","confirmShiftButton","closeShiftGroupButton","availabilityNotePanel","closeAvailabilityNotePanel","availabilityNoteFullText",
    "shiftDateActionModal","shiftDateActionTitle","shiftDateActionHelp","shiftDateActionInput","shiftDateActionError","saveShiftDateActionButton","cancelShiftDateActionButton",
@@ -89,7 +90,7 @@ function bindEvents() {
   el.pendingLogoutButton.addEventListener("click", signOutUser);
   el.rejectedLogoutButton.addEventListener("click", signOutUser);
   el.openAdminButton.addEventListener("click", openMenu);
-  [el.menuButton, el.requestsMenuButton, el.accountApprovalsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton, el.dailyProgressMenuButton]
+  [el.menuButton, el.requestsMenuButton, el.accountApprovalsMenuButton, el.shiftBuilderMenuButton, el.guardManagementMenuButton, el.deletedAccountsMenuButton, el.proxyWorkerMenuButton, el.ownShiftsMenuButton, el.dailyProgressMenuButton, el.departureContactMenuButton]
     .forEach(button => button.addEventListener("click", openMenu));
   el.closeMenuButton.addEventListener("click", closeMenu);
   el.sideMenuBackdrop.addEventListener("click", event => { if (event.target === el.sideMenuBackdrop) closeMenu(); });
@@ -100,13 +101,13 @@ function bindEvents() {
   });
   el.menuAdminButton.addEventListener("click", async () => { closeMenu(); await showAdmin(profile, roleData); });
   el.menuShiftBuilderButton.addEventListener("click", async () => { closeMenu(); await showShiftBuilder(profile, roleData); });
-  el.menuOwnShiftsButton.addEventListener("click", () => {
-    closeMenu();
-    showOwnShifts(profile);
-  });
   el.menuDailyProgressButton.addEventListener("click", async () => {
     closeMenu();
     await showDailyProgress(profile, roleData);
+  });
+  el.menuDepartureContactButton.addEventListener("click", () => {
+    closeMenu();
+    showDepartureContact(profile);
   });
   el.menuCalendarButton.addEventListener("click", async () => {
     closeMenu();
@@ -214,12 +215,12 @@ async function handleRoleChange(nextRole, expectedUid = activeAuthUid, sessionVe
   el.menuShiftBuilderButton.hidden = !isOffice;
   el.menuRequestsButton.hidden = !isOffice;
   el.menuDailyProgressButton.hidden = !isOffice;
+  el.menuDepartureContactButton.hidden = false;
   el.applicationsMenuGroup.hidden = roleData.role !== "admin";
   el.menuAccountApprovalsButton.hidden = roleData.role !== "admin";
   el.adminBranchSwitchWrap.hidden = roleData.role !== "admin";
   el.otherBranchCandidatesOption.hidden = roleData.role !== "staff";
   el.menuCalendarButton.textContent = isOffice ? "自分の勤務希望" : "勤務希望入力";
-  el.menuOwnShiftsButton.textContent = isOffice ? "自分のシフト" : "シフト確認";
   if (isOffice) await showAdmin(profile, roleData);
   else {
     resetCalendarState();
@@ -400,7 +401,9 @@ function showScreen(name) {
     admin:el.adminScreen, requests:el.staffRequestsScreen, shiftBuilder:el.shiftBuilderScreen,
     accountApprovals:el.accountApprovalsScreen,
     guardManagement:el.guardManagementScreen, deletedAccounts:el.deletedAccountsScreen,
-    proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen, dailyProgress:el.dailyProgressScreen};
+    proxyWorkers:el.proxyWorkerScreen, ownShifts:el.ownShiftsScreen, dailyProgress:el.dailyProgressScreen,
+    departureContact:el.departureContactScreen};
+  if (name !== "dailyProgress" && name !== "departureContact") stopDepartureProgressObservers();
   Object.values(screens).forEach(screen => screen?.classList.remove("active"));
   screens[name]?.classList.add("active"); window.scrollTo({top:0, behavior:"smooth"});
 }
